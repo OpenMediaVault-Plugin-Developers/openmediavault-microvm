@@ -1,0 +1,60 @@
+{
+  "type": "config",
+  "id": "conf.service.microvm.vm",
+  "title": "microvm virtual machine",
+  "queryinfo": {
+    "xpath": "//services/microvm/vms/vm",
+    "iterable": true,
+    "idproperty": "uuid"
+  },
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "format": "uuidv4"
+    },
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "enable": {
+      "type": "boolean",
+      "default": true
+    },
+    "autostart": {
+      "type": "boolean",
+      "default": false
+    },
+    "vcpus": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32,
+      "default": 1
+    },
+    "memory_mib": {
+      "type": "integer",
+      "minimum": 128,
+      "maximum": 65536,
+      "default": 512
+    },
+    "imageref": {
+      "type": "string",
+      "default": ""
+    },
+    "bridge": {
+      "type": "string",
+      "default": ""
+    },
+    "macaddr": {
+      "type": "string",
+      "default": ""
+    },
+    "bootargs": {
+      "type": "string",
+      "default": "console=ttyS0 reboot=k panic=1 pci=off"
+    },
+    "notes": {
+      "type": "string",
+      "default": ""
+    }
+  }
+}

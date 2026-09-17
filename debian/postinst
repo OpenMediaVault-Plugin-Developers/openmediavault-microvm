@@ -1,0 +1,32 @@
+#!/bin/sh
+
+set -e
+
+. /etc/default/openmediavault
+. /usr/share/openmediavault/scripts/helper-functions
+
+case "$1" in
+    configure)
+        # Activate package triggers.
+        dpkg-trigger update-workbench
+
+        # Initialize configuration database.
+        omv-confdbadm create "conf.service.microvm"
+        if [ -n "$2" ]; then
+          omv-confdbadm migrate "conf.service.microvm" "${2}"
+        fi
+
+        # run salt to apply configuration
+        omv-salt deploy run --no-color --quiet microvm || :
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

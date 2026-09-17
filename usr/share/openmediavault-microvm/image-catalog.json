@@ -1,0 +1,18 @@
+[
+  {
+    "name": "ubuntu-24.04",
+    "arch": "x86_64",
+    "version": "fc1.15-5.10.245",
+    "description": "Ubuntu 24.04 minimal rootfs, x86_64 (Firecracker CI quickstart image)",
+    "kernel_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/vmlinux-5.10.245",
+    "rootfs_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/ubuntu-24.04.squashfs"
+  },
+  {
+    "name": "ubuntu-24.04",
+    "arch": "aarch64",
+    "version": "fc1.15-5.10.245",
+    "description": "Ubuntu 24.04 minimal rootfs, aarch64 (Firecracker CI quickstart image)",
+    "kernel_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/aarch64/vmlinux-5.10.245",
+    "rootfs_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/aarch64/ubuntu-24.04.squashfs"
+  }
+]

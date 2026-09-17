@@ -1,0 +1,20 @@
+[Unit]
+Description=OMV Firecracker microVM (%i)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/omv-microvm-run %i
+ExecStopPost=/usr/sbin/omv-microvm-stop-cleanup %i
+Restart=no
+StandardOutput=journal
+StandardError=journal
+# dtach's own SIGTERM handler voluntarily calls exit(1) rather than dying
+# by the signal itself (see dtach's master.c: signal(SIGTERM, die); die()
+# { exit(1); }), so a normal `systemctl stop` — which sends SIGTERM —
+# would otherwise always be reported as a failed unit even though it
+# stopped exactly as requested.
+SuccessExitStatus=1
+
+[Install]
+WantedBy=multi-user.target

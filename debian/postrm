@@ -1,0 +1,42 @@
+#!/bin/sh
+
+set -e
+
+. /etc/default/openmediavault
+. /usr/share/openmediavault/scripts/helper-functions
+
+remove_action() {
+    # Stop and disable any running VM instances of the systemd template unit.
+    for unit in $(systemctl list-units --all --no-legend --plain 'omv-microvm@*.service' 2>/dev/null | awk '{print $1}'); do
+        systemctl stop "${unit}" 2>/dev/null || true
+        systemctl disable "${unit}" 2>/dev/null || true
+    done
+    rm -f /etc/systemd/system/omv-microvm@.service
+    rm -f /etc/logrotate.d/openmediavault-microvm
+    systemctl daemon-reload 2>/dev/null || true
+    # Activate trigger to purge cached files.
+    dpkg-trigger update-workbench
+}
+
+case "$1" in
+    purge)
+        remove_action
+        omv_config_delete "/config/services/microvm"
+        rm -rf /var/lib/openmediavault/microvm
+        rm -f /var/log/openmediavault-microvm.log*
+    ;;
+
+    remove)
+        remove_action
+    ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

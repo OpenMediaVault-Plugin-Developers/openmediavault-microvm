@@ -1,0 +1,175 @@
+[
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.setsettings",
+    "params": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "required": true
+        },
+        "sharedfolderref": {
+          "type": "string",
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "uuidv4"
+            },
+            {
+              "type": "string",
+              "maxLength": 0
+            }
+          ]
+        },
+        "default_bridge": {
+          "type": "string"
+        },
+        "install_cterm": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.name",
+    "params": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.setvm",
+    "params": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "format": "uuidv4",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "required": true
+        },
+        "enable": {
+          "type": "boolean",
+          "required": true
+        },
+        "autostart": {
+          "type": "boolean",
+          "required": true
+        },
+        "vcpus": {
+          "type": "integer",
+          "required": true
+        },
+        "memory_mib": {
+          "type": "integer",
+          "required": true
+        },
+        "imageref": {
+          "type": "string",
+          "required": true
+        },
+        "bridge": {
+          "type": "string",
+          "required": true
+        },
+        "macaddr": {
+          "type": "string"
+        },
+        "bootargs": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.docommand",
+    "params": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "format": "uuidv4",
+          "required": true
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "start",
+            "stop",
+            "restart",
+            "forcestop",
+            "delete",
+            "autostartenable",
+            "autostartdisable"
+          ],
+          "required": true
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.downloadimage",
+    "params": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "arch": {
+          "type": "string",
+          "required": true
+        },
+        "version": {
+          "type": "string"
+        },
+        "kernel_url": {
+          "type": "string",
+          "required": true
+        },
+        "rootfs_url": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.downloadcatalogimage",
+    "params": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "required": true
+        }
+      }
+    }
+  }
+]

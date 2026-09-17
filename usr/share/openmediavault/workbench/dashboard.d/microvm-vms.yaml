@@ -1,0 +1,33 @@
+version: "1.0"
+type: dashboard-widget
+data:
+  id: 9c4e2b7a-1d6f-4e8a-a3c5-2f7b8e9d0a1c
+  title: _("MicroVMs")
+  type: datatable
+  reloadPeriod: 30000
+  permissions:
+    role:
+    - admin
+  datatable:
+    columns:
+    - name: _("Name")
+      prop: name
+      flexGrow: 1
+      sortable: true
+    - name: _("State")
+      prop: state
+      sortable: true
+      flexGrow: 1
+    - name: _("vCPUs")
+      prop: vcpus
+      sortable: true
+      flexGrow: 1
+    - name: _("Memory (MiB)")
+      prop: memory_mib
+      sortable: true
+      flexGrow: 1
+    store:
+      proxy:
+        service: MicroVm
+        get:
+          method: getVmNameStateList

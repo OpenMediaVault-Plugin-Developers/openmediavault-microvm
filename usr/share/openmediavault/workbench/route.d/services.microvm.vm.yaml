@@ -1,0 +1,6 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/vm"
+  title: _("VMs")
+  component: omv-services-microvm-vm-datatable-page

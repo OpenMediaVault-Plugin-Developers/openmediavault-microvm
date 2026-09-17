@@ -1,0 +1,8 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/settings"
+  title: _("Settings")
+  editing: true
+  notificationTitle: _("Edit settings.")
+  component: omv-services-microvm-settings-form-page

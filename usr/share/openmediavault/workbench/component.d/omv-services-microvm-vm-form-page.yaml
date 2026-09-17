@@ -1,0 +1,115 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-vm-form-page
+  type: formPage
+  config:
+    request:
+      service: MicroVm
+      get:
+        method: getVm
+        params:
+          uuid: "{{ _routeParams.uuid }}"
+      post:
+        method: setVm
+    fields:
+      - type: confObjUuid
+      - type: divider
+        title: _("Settings")
+      - type: textInput
+        name: name
+        label: _("Name")
+        value: ""
+        hint: _("Also used as the systemd instance name and to derive the TAP device name.")
+        validators:
+          required: true
+          patternType: shareName
+      - type: checkbox
+        name: enable
+        label: _("Enabled")
+        value: true
+      - type: checkbox
+        name: autostart
+        label: _("Autostart on boot")
+        value: false
+      - type: select
+        name: imageref
+        label: _("Image")
+        value: ""
+        textField: desc
+        valueField: ref
+        store:
+          proxy:
+            service: MicroVm
+            get:
+              method: enumerateImages
+        validators:
+          required: true
+        modifiers:
+          - type: disabled
+            constraint:
+              operator: ne
+              arg0:
+                prop: uuid
+              arg1: fa4b1c66-ef79-11e5-87a0-0002b3a176b4
+      - type: select
+        name: bridge
+        label: _("Bridge")
+        textField: bridge
+        valueField: bridge
+        value: ""
+        store:
+          proxy:
+            service: MicroVm
+            get:
+              method: enumerateBridges
+        validators:
+          required: true
+      - type: container
+        fields:
+          - type: numberInput
+            name: vcpus
+            label: _("vCPUs")
+            value: 1
+            flex: 10
+            validators:
+              min: 1
+              max: 32
+              patternType: integer
+              required: true
+          - type: numberInput
+            name: memory_mib
+            label: _("Memory (MiB)")
+            value: 512
+            flex: 10
+            validators:
+              min: 128
+              max: 65536
+              patternType: integer
+              required: true
+      - type: textInput
+        name: macaddr
+        label: _("MAC address")
+        value: ""
+        hint: _("Leave blank for a Firecracker-assigned address.")
+      - type: textInput
+        name: bootargs
+        label: _("Boot arguments")
+        value: "console=ttyS0 reboot=k panic=1 pci=off"
+        hint: _("Keep console=ttyS0 — removing it (or pointing it elsewhere) silences the guest's serial console. The VM will still boot and run fine, but the Console log and the cterm terminal will show nothing.")
+      - type: divider
+        title: _("Notes")
+      - type: textarea
+        name: notes
+        label: _("Notes")
+        value: ""
+        rows: 3
+    buttons:
+      - template: submit
+        execute:
+          type: url
+          url: "/services/microvm/vm"
+      - template: cancel
+        execute:
+          type: url
+          url: "/services/microvm/vm"

@@ -1,0 +1,7 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/vm/create"
+  title: _("Create VM")
+  notificationTitle: _("Created VM.")
+  component: omv-services-microvm-vm-form-page

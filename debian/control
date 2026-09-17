@@ -1,0 +1,20 @@
+Source: openmediavault-microvm
+Section: net
+XB-Plugin-Section: utilities
+Priority: optional
+Maintainer: OpenMediaVault Plugin Developers <plugins@omv-extras.org>
+Build-Depends: debhelper-compat (= 14), dh-sequence-single-binary
+Standards-Version: 4.7.2
+Homepage: http://omv-extras.org/
+
+Package: openmediavault-microvm
+Architecture: all
+Depends: dtach,
+         e2fsprogs,
+         openmediavault (>= 8),
+         openmediavault-sharerootfs,
+         squashfs-tools
+Recommends: openmediavault-cterm (>= 8)
+Description: microvm plugin for openmediavault.
+ Run Firecracker microVMs on openmediavault. Firecracker is a lightweight
+ KVM-based virtual machine monitor built for fast boot and minimal overhead.

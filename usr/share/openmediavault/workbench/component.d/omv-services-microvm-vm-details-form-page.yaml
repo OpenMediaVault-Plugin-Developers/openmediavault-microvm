@@ -1,0 +1,47 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-vm-details-form-page
+  type: formPage
+  config:
+    request:
+      service: MicroVm
+      get:
+        method: getVmDetails
+        params:
+          name: '{{ _routeParams.name }}'
+    fields:
+      - type: textInput
+        label: _("VM name")
+        name: name
+        value: '{{ _routeParams.name }}'
+        readonly: true
+      - type: textInput
+        label: _("State")
+        name: state
+        readonly: true
+      - type: textarea
+        name: vminfo
+        label: _("systemd unit status")
+        rows: 14
+        readonly: true
+        monospace: true
+      - type: textarea
+        name: consolelog
+        label: _("Console log (last 200 lines)")
+        rows: 14
+        readonly: true
+        monospace: true
+      - type: hidden
+        name: termurl
+        submitValue: false
+    buttons:
+      - text: _("Open live console")
+        icon: mdi:console
+        execute:
+          type: url
+          url: "/externalRedirect/{{ termurl | encodeuricomponent }}"
+      - template: cancel
+        execute:
+          type: url
+          url: "/services/microvm/vm"

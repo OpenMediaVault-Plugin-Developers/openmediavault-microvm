@@ -1,0 +1,7 @@
+version: "1.0"
+type: navigation-item
+data:
+  path: "services.microvm"
+  text: _("MicroVM")
+  icon: "mdi:chip"
+  url: "/services/microvm"

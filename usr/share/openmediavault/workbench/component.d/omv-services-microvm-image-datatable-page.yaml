@@ -1,0 +1,152 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-image-datatable-page
+  type: datatablePage
+  config:
+    autoReload: 10000
+    hasSearchField: true
+    stateId: 3d8b6a1c-4f2e-4a9d-8b3c-7e1f9d2a5c6b
+    rowId: uuid
+    sorters:
+      - dir: asc
+        prop: name
+    store:
+      proxy:
+        service: MicroVm
+        get:
+          method: getImageList
+    columns:
+      - name: _("Name")
+        prop: name
+        flexGrow: 2
+        sortable: true
+      - name: _("Arch")
+        prop: arch
+        flexGrow: 1
+        sortable: true
+      - name: _("Version")
+        prop: version
+        flexGrow: 1
+        sortable: true
+      - name: _("Size")
+        prop: size_bytes
+        flexGrow: 1
+        sortable: true
+        cellTemplateName: binaryUnit
+      - name: _("Imported")
+        prop: imported
+        flexGrow: 1
+        sortable: true
+        cellTemplateName: localeDateTime
+      - name: _("Kernel path")
+        prop: kernel_path
+        flexGrow: 2
+        sortable: false
+      - name: _("Rootfs path")
+        prop: rootfs_path
+        flexGrow: 2
+        sortable: false
+    actions:
+      - type: iconButton
+        icon: mdi:cloud-download-outline
+        tooltip: _("Download from catalog")
+        execute:
+          type: formDialog
+          formDialog:
+            title: _("Download image from catalog ...")
+            fields:
+              - type: select
+                name: catalog_id
+                label: _("Image")
+                textField: description
+                valueField: id
+                store:
+                  proxy:
+                    service: MicroVm
+                    get:
+                      method: getImageCatalog
+                validators:
+                  required: true
+            buttons:
+              submit:
+                text: _("Download")
+                execute:
+                  type: taskDialog
+                  taskDialog:
+                    config:
+                      title: _("Downloading image ...")
+                      startOnInit: true
+                      request:
+                        service: MicroVm
+                        method: downloadCatalogImage
+                        params:
+                          catalog_id: "{{ catalog_id | int }}"
+      - type: iconButton
+        icon: mdi:link-plus
+        tooltip: _("Download from URL")
+        execute:
+          type: formDialog
+          formDialog:
+            title: _("Download image from URL ...")
+            fields:
+              - type: textInput
+                name: name
+                label: _("Name")
+                validators:
+                  required: true
+                  patternType: shareName
+              - type: select
+                name: arch
+                label: _("Architecture")
+                value: "x86_64"
+                store:
+                  data:
+                    - ["x86_64", _("x86_64")]
+                    - ["aarch64", _("aarch64")]
+              - type: textInput
+                name: version
+                label: _("Version")
+                value: ""
+                hint: _("Optional. Lets this image coexist with other versions of the same name/architecture, e.g. when downloading a newer build later.")
+              - type: textInput
+                name: kernel_url
+                label: _("Kernel URL")
+                hint: _("Direct link to an uncompressed vmlinux kernel binary.")
+                validators:
+                  required: true
+              - type: textInput
+                name: rootfs_url
+                label: _("Rootfs URL")
+                hint: _("Direct link to a raw/ext4 rootfs image.")
+                validators:
+                  required: true
+            buttons:
+              submit:
+                text: _("Download")
+                execute:
+                  type: taskDialog
+                  taskDialog:
+                    config:
+                      title: _("Downloading image ...")
+                      startOnInit: true
+                      request:
+                        service: MicroVm
+                        method: downloadImage
+                        params:
+                          name: "{{ name }}"
+                          arch: "{{ arch }}"
+                          version: "{{ version }}"
+                          kernel_url: "{{ kernel_url }}"
+                          rootfs_url: "{{ rootfs_url }}"
+      - template: delete
+        execute:
+          type: request
+          request:
+            service: MicroVm
+            method: deleteImage
+            params:
+              uuid: "{{ _selected[0].uuid }}"
+        enabledConstraints:
+          minSelected: 1
+          maxSelected: 1

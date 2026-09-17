@@ -1,0 +1,8 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/vm/edit/:uuid"
+  title: _("Edit VM")
+  editing: true
+  notificationTitle: _("Edit VM.")
+  component: omv-services-microvm-vm-form-page

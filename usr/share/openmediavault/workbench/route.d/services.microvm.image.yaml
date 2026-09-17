@@ -1,0 +1,6 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/image"
+  title: _("Images")
+  component: omv-services-microvm-image-datatable-page

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-stop-cleanup — tear down the TAP device for a microVM.
+#
+# Invoked as `ExecStopPost=/usr/sbin/omv-microvm-stop-cleanup %i` by the
+# omv-microvm@.service systemd template unit, after firecracker has exited.
+#
+# Usage: omv-microvm-stop-cleanup <vm-name>
+
+set -uo pipefail
+
+VMNAME="${1:?usage: omv-microvm-stop-cleanup <vm-name>}"
+
+# Must match the derivation in omv-microvm-run.
+TAP_NAME="mvm-$(echo -n "$VMNAME" | md5sum | cut -c1-10)"
+
+if ip link show "$TAP_NAME" >/dev/null 2>&1; then
+    ip link del "$TAP_NAME"
+fi
+
+exit 0

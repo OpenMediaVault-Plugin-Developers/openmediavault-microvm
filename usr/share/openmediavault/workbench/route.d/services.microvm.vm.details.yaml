@@ -1,0 +1,7 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/vm/details/:name"
+  title: _("Details")
+  editing: true
+  component: omv-services-microvm-vm-details-form-page

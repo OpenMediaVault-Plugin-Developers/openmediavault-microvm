@@ -1,0 +1,8 @@
+version: "1.0"
+type: navigation-item
+data:
+  path: "services.microvm.image"
+  text: _("Images")
+  position: 20
+  icon: mdi:harddisk
+  url: "/services/microvm/image"

@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-run — supervise a single Firecracker microVM.
+#
+# Invoked as `ExecStart=/usr/sbin/omv-microvm-run %i` by the
+# omv-microvm@.service systemd template unit. Reads the VM's confdb
+# record fresh on every start, prepares its per-VM working directory and
+# TAP device, writes a Firecracker config file, then execs firecracker
+# so systemd supervises it directly (Type=simple).
+#
+# Usage: omv-microvm-run <vm-name>
+
+set -euo pipefail
+
+VMNAME="${1:?usage: omv-microvm-run <vm-name>}"
+
+_log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
+}
+
+# The unit sets SuccessExitStatus=1 because dtach itself exits 1 by design
+# when it receives SIGTERM from a normal `systemctl stop`, once it has
+# taken over as the unit's main process (see the `exec dtach` handoff at
+# the end of this script). That carve-out would just as happily swallow a
+# genuine startup failure here, so every failure exit before the handoff
+# uses exit 2 instead — including the fallback trap, which catches a bare
+# command failing under `set -e` with its own exit 1 before we reach dtach.
+STARTED=0
+on_exit() {
+    local ec=$?
+    if [ "$STARTED" -eq 0 ] && [ "$ec" -eq 1 ]; then
+        exit 2
+    fi
+}
+trap on_exit EXIT
+
+die() {
+    _log "ERROR: $*"
+    exit 2
+}
+
+# ---------------------------------------------------------------------------
+# Read the VM record from confdb.
+# ---------------------------------------------------------------------------
+VM_JSON=$(omv-confdbadm read "conf.service.microvm.vm" 2>/dev/null \
+    | jq -c --arg name "$VMNAME" '.[] | select(.name == $name)')
+[ -n "$VM_JSON" ] || die "VM '${VMNAME}' not found in configuration."
+
+ENABLE=$(echo "$VM_JSON" | jq -r '.enable')
+[ "$ENABLE" = "true" ] || die "VM '${VMNAME}' is disabled."
+
+VCPUS=$(echo "$VM_JSON" | jq -r '.vcpus')
+MEMORY_MIB=$(echo "$VM_JSON" | jq -r '.memory_mib')
+IMAGE_REF=$(echo "$VM_JSON" | jq -r '.imageref')
+BRIDGE=$(echo "$VM_JSON" | jq -r '.bridge')
+MACADDR=$(echo "$VM_JSON" | jq -r '.macaddr // ""')
+BOOTARGS=$(echo "$VM_JSON" | jq -r '.bootargs')
+
+if [ -z "$IMAGE_REF" ] || [ "$IMAGE_REF" = "null" ]; then
+    die "No image configured."
+fi
+if [ -z "$BRIDGE" ] || [ "$BRIDGE" = "null" ]; then
+    die "No bridge configured."
+fi
+
+# ---------------------------------------------------------------------------
+# Resolve the storage shared folder (same one the RPC service uses).
+# ---------------------------------------------------------------------------
+SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
+SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
+[ -n "$SF_UUID" ] || die "No shared folder configured for VM storage."
+SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" | jq -r '.')
+[ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
+
+VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+mkdir -p "$VM_DIR"
+
+# Each VM gets its own writable copy of the kernel and rootfs, made once on
+# first boot, so multiple VMs can share a base image without depending on
+# it (or on each other) afterwards. A VM that has already booted needs
+# neither the image's confdb record nor its files to boot again.
+ROOTFS_PATH="${VM_DIR}/rootfs.ext4"
+KERNEL_PATH="${VM_DIR}/vmlinux"
+
+if [ ! -f "$ROOTFS_PATH" ] || [ ! -f "$KERNEL_PATH" ]; then
+    # Images are referenced by a name-arch[-version] string, not a uuid: the
+    # same base name (e.g. "ubuntu-24.04") can exist once per architecture,
+    # and again once per version.
+    IMAGE_JSON=$(omv-confdbadm read "conf.service.microvm.image" 2>/dev/null \
+        | jq -c --arg ref "$IMAGE_REF" '
+            .[] | select(
+                (if (.version // "") == "" then (.name + "-" + .arch)
+                 else (.name + "-" + .arch + "-" + .version) end) == $ref
+            )')
+    [ -n "$IMAGE_JSON" ] || die "Image '${IMAGE_REF}' not found."
+
+    BASE_KERNEL_PATH=$(echo "$IMAGE_JSON" | jq -r '.kernel_path')
+    BASE_ROOTFS_PATH=$(echo "$IMAGE_JSON" | jq -r '.rootfs_path')
+fi
+
+if [ ! -f "$ROOTFS_PATH" ]; then
+    [ -f "$BASE_ROOTFS_PATH" ] || die "Rootfs image missing: ${BASE_ROOTFS_PATH}"
+    _log "Copying base rootfs (first boot) ..."
+    cp --reflink=auto "$BASE_ROOTFS_PATH" "$ROOTFS_PATH"
+fi
+
+if [ ! -f "$KERNEL_PATH" ]; then
+    [ -f "$BASE_KERNEL_PATH" ] || die "Kernel image missing: ${BASE_KERNEL_PATH}"
+    _log "Copying kernel (first boot) ..."
+    cp --reflink=auto "$BASE_KERNEL_PATH" "$KERNEL_PATH"
+fi
+
+# The API socket lives under /run rather than the VM's (potentially long,
+# e.g. under /srv/dev-disk-by-uuid-.../) shared-folder directory: AF_UNIX
+# socket paths are capped at ~108 bytes (sockaddr_un.sun_path/SUN_LEN), and
+# shared-folder paths alone routinely exceed that once the VM name is
+# appended.
+RUN_DIR="/run/openmediavault-microvm/${VMNAME}"
+mkdir -p "$RUN_DIR"
+SOCKET_PATH="${RUN_DIR}/firecracker.socket"
+# dtach's own control socket is subject to the same SUN_LEN limit.
+DTACH_SOCK="${RUN_DIR}/console.dtach"
+# console.log is the guest's own serial output (ttyS0), captured from
+# Firecracker's stdout below. vmm.log is Firecracker's own internal
+# diagnostic log (--log-path) — a separate stream, not the guest console.
+CONSOLE_LOG="${VM_DIR}/console.log"
+VMM_LOG="${VM_DIR}/vmm.log"
+CONFIG_PATH="${VM_DIR}/vm_config.json"
+rm -f "$SOCKET_PATH"
+: > "$CONSOLE_LOG"
+# Firecracker requires --log-path to point at an already-existing file.
+: > "$VMM_LOG"
+
+# ---------------------------------------------------------------------------
+# TAP device, attached to the configured host bridge.
+# ---------------------------------------------------------------------------
+# Deterministic short name derived from the VM name (Linux IFNAMSIZ is 15
+# bytes) so omv-microvm-stop-cleanup can find and remove the same device.
+TAP_NAME="mvm-$(echo -n "$VMNAME" | md5sum | cut -c1-10)"
+
+if ! ip link show "$TAP_NAME" >/dev/null 2>&1; then
+    ip tuntap add dev "$TAP_NAME" mode tap
+fi
+ip link set "$TAP_NAME" master "$BRIDGE"
+ip link set "$TAP_NAME" up
+
+# ---------------------------------------------------------------------------
+# Firecracker config file.
+# ---------------------------------------------------------------------------
+NETIF_JSON="{\"iface_id\":\"eth0\",\"host_dev_name\":\"${TAP_NAME}\"}"
+if [ -n "$MACADDR" ] && [ "$MACADDR" != "null" ]; then
+    NETIF_JSON="{\"iface_id\":\"eth0\",\"host_dev_name\":\"${TAP_NAME}\",\"guest_mac\":\"${MACADDR}\"}"
+fi
+
+jq -n \
+    --arg kernel "$KERNEL_PATH" \
+    --arg bootargs "$BOOTARGS" \
+    --arg rootfs "$ROOTFS_PATH" \
+    --argjson vcpus "$VCPUS" \
+    --argjson mem "$MEMORY_MIB" \
+    --argjson netif "$NETIF_JSON" \
+    '{
+        "boot-source": {
+            "kernel_image_path": $kernel,
+            "boot_args": $bootargs
+        },
+        "drives": [{
+            "drive_id": "rootfs",
+            "path_on_host": $rootfs,
+            "is_root_device": true,
+            "is_read_only": false
+        }],
+        "network-interfaces": [$netif],
+        "machine-config": {
+            "vcpu_count": $vcpus,
+            "mem_size_mib": $mem
+        }
+    }' > "$CONFIG_PATH"
+
+_log "Starting Firecracker (vcpus=${VCPUS} mem=${MEMORY_MIB}MiB bridge=${BRIDGE} tap=${TAP_NAME}) ..."
+
+# Run under dtach so a separate cterm session (omv-microvm-console) can
+# attach to the guest's live serial console (ttyS0) later, and under
+# script so the full session is recorded to console.log regardless of
+# whether anyone is attached at the time — that's what the workbench's
+# read-only "Console log" viewer tails. Firecracker's own structured VMM
+# log is written separately via --log-path.
+#
+# dtach -N stays in the foreground rather than daemonizing (unlike plain
+# -n/-A), so systemd's Type=simple keeps tracking the right PID for the
+# whole VM lifetime. On stop, systemd's default KillMode=control-group
+# signals every process in the unit's cgroup — dtach, script, and
+# Firecracker alike — so shutdown doesn't depend on dtach forwarding
+# SIGTERM through the nested PTYs itself.
+STARTED=1
+exec dtach -N "$DTACH_SOCK" \
+    script -qfc "/usr/local/bin/firecracker --api-sock '${SOCKET_PATH}' --config-file '${CONFIG_PATH}' --log-path '${VMM_LOG}' --level Info" \
+    "$CONSOLE_LOG"

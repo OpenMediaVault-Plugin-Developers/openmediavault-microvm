@@ -1,0 +1,55 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-settings-form-page
+  type: formPage
+  config:
+    request:
+      service: MicroVm
+      get:
+        method: getSettings
+      post:
+        method: setSettings
+    fields:
+      - type: checkbox
+        name: enable
+        label: _("Enable")
+        value: true
+      - type: divider
+        title: _("Storage")
+      - type: sharedFolderSelect
+        name: sharedfolderref
+        label: _("Shared folder")
+        hasEmptyOption: true
+        hint: _("Where per-VM working directories (writable rootfs copies) and downloaded images are stored.")
+      - type: divider
+        title: _("Networking")
+      - type: select
+        name: default_bridge
+        label: _("Default bridge")
+        hasEmptyOption: true
+        textField: bridge
+        valueField: bridge
+        store:
+          proxy:
+            service: MicroVm
+            get:
+              method: enumerateBridges
+        hint: _("Pre-selected bridge when creating a new VM.")
+      - type: divider
+        title: _("Console")
+      - type: checkbox
+        name: install_cterm
+        label: _("Install cterm")
+        value: true
+        hint: _("Installs the cterm plugin, which provides the web-based VM console/terminal link. Disable if you manage cterm yourself or don't want a console link.")
+      - type: divider
+        title: _("Firecracker")
+      - type: textInput
+        name: firecracker_version
+        label: _("Installed version")
+        readonly: true
+        disabled: true
+        submitValue: false
+    buttons:
+      - template: submit

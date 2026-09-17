@@ -1,0 +1,48 @@
+{
+  "type": "config",
+  "id": "conf.service.microvm.image",
+  "title": "microvm image",
+  "queryinfo": {
+    "xpath": "//services/microvm/images/image",
+    "iterable": true,
+    "idproperty": "uuid"
+  },
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "format": "uuidv4"
+    },
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "arch": {
+      "type": "string",
+      "default": "x86_64"
+    },
+    "version": {
+      "type": "string",
+      "default": ""
+    },
+    "kernel_path": {
+      "type": "string",
+      "default": ""
+    },
+    "rootfs_path": {
+      "type": "string",
+      "default": ""
+    },
+    "source_url": {
+      "type": "string",
+      "default": ""
+    },
+    "size_bytes": {
+      "type": "integer",
+      "default": 0
+    },
+    "imported": {
+      "type": "string",
+      "default": ""
+    }
+  }
+}

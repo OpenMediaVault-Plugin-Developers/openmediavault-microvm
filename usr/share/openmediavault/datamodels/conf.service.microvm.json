@@ -1,0 +1,147 @@
+{
+  "type": "config",
+  "title": "microvm",
+  "id": "conf.service.microvm",
+  "queryinfo": {
+    "xpath": "/config/services/microvm",
+    "iterable": false
+  },
+  "properties": {
+    "enable": {
+      "type": "boolean",
+      "default": true
+    },
+    "sharedfolderref": {
+      "type": "string",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "uuidv4"
+        },
+        {
+          "type": "string",
+          "maxLength": 0
+        }
+      ],
+      "default": ""
+    },
+    "default_bridge": {
+      "type": "string",
+      "default": ""
+    },
+    "install_cterm": {
+      "type": "boolean",
+      "default": true
+    },
+    "vms": {
+      "type": "object",
+      "properties": {
+        "vm": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uuid": {
+                "type": "string",
+                "format": "uuidv4"
+              },
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "enable": {
+                "type": "boolean",
+                "default": true
+              },
+              "autostart": {
+                "type": "boolean",
+                "default": false
+              },
+              "vcpus": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32,
+                "default": 1
+              },
+              "memory_mib": {
+                "type": "integer",
+                "minimum": 128,
+                "maximum": 65536,
+                "default": 512
+              },
+              "imageref": {
+                "type": "string",
+                "default": ""
+              },
+              "bridge": {
+                "type": "string",
+                "default": ""
+              },
+              "macaddr": {
+                "type": "string",
+                "default": ""
+              },
+              "bootargs": {
+                "type": "string",
+                "default": "console=ttyS0 reboot=k panic=1 pci=off"
+              },
+              "notes": {
+                "type": "string",
+                "default": ""
+              }
+            }
+          }
+        }
+      }
+    },
+    "images": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uuid": {
+                "type": "string",
+                "format": "uuidv4"
+              },
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "arch": {
+                "type": "string",
+                "default": "x86_64"
+              },
+              "version": {
+                "type": "string",
+                "default": ""
+              },
+              "kernel_path": {
+                "type": "string",
+                "default": ""
+              },
+              "rootfs_path": {
+                "type": "string",
+                "default": ""
+              },
+              "source_url": {
+                "type": "string",
+                "default": ""
+              },
+              "size_bytes": {
+                "type": "integer",
+                "default": 0
+              },
+              "imported": {
+                "type": "string",
+                "default": ""
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+version: "1.0"
+type: log
+data:
+  id: microvm
+  text: _("MicroVM")
+  columns:
+    - name: _("Date & Time")
+      sortable: true
+      prop: date
+      cellTemplateName: localeDateTime
+      flexGrow: 1
+    - name: _("Component")
+      sortable: true
+      prop: component
+      flexGrow: 1
+    - name: _("Call")
+      sortable: true
+      prop: call
+      flexGrow: 1
+    - name: _("Message")
+      sortable: true
+      prop: message
+      flexGrow: 3
+  request:
+    service: LogFile
+    method: getList
+    params:
+      id: microvm

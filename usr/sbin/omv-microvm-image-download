@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-image-download — fetch a Firecracker kernel + rootfs pair.
+#
+# Invoked from the MicroVm RPC service's downloadImage background job.
+# Downloads into a temporary location first so a failed/interrupted fetch
+# never leaves a partial image registered as usable.
+#
+# Firecracker's own CI has published rootfs images as read-only .squashfs
+# (instead of ready-to-use .ext4) since v1.12 — it's a distribution format
+# only, never booted directly. Firecracker's own tooling (tools/setup-ci-
+# artifacts.sh) unpacks it and repacks it as a plain ext4 image before use,
+# which is exactly what this script does too, so the rest of the plugin
+# (omv-microvm-run, the datamodel) only ever deals with a single ext4 file.
+#
+# Usage: omv-microvm-image-download <dest-dir> <kernel-url> <rootfs-url>
+
+set -euo pipefail
+
+DEST_DIR="${1:?usage: omv-microvm-image-download <dest-dir> <kernel-url> <rootfs-url>}"
+KERNEL_URL="${2:?missing kernel-url}"
+ROOTFS_URL="${3:?missing rootfs-url}"
+
+_log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+TMP_DIR=$(mktemp -d "${DEST_DIR%/*}/.download.XXXXXX" 2>/dev/null || mktemp -d)
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
+mkdir -p "$DEST_DIR"
+
+_log "Downloading kernel from ${KERNEL_URL} ..."
+wget --quiet --show-progress -O "${TMP_DIR}/vmlinux" "$KERNEL_URL"
+
+if [[ "$ROOTFS_URL" == *.squashfs ]]; then
+    _log "Downloading squashfs rootfs from ${ROOTFS_URL} ..."
+    wget --quiet --show-progress -O "${TMP_DIR}/rootfs.squashfs" "$ROOTFS_URL"
+
+    _log "Unpacking squashfs image ..."
+    unsquashfs -d "${TMP_DIR}/rootfs-root" -f "${TMP_DIR}/rootfs.squashfs" >/dev/null
+
+    # Size the ext4 image to the unpacked content plus headroom for the VM
+    # to actually write to (logs, packages, /tmp, ...).
+    CONTENT_MB=$(du -sm "${TMP_DIR}/rootfs-root" | cut -f1)
+    IMAGE_MB=$((CONTENT_MB + 512))
+
+    _log "Building ${IMAGE_MB}MiB ext4 image from unpacked content ..."
+    truncate -s "${IMAGE_MB}M" "${TMP_DIR}/rootfs.ext4"
+    mkfs.ext4 -q -F -d "${TMP_DIR}/rootfs-root" "${TMP_DIR}/rootfs.ext4"
+else
+    _log "Downloading rootfs from ${ROOTFS_URL} ..."
+    wget --quiet --show-progress -O "${TMP_DIR}/rootfs.ext4" "$ROOTFS_URL"
+fi
+
+mv -f "${TMP_DIR}/vmlinux" "${DEST_DIR}/vmlinux"
+mv -f "${TMP_DIR}/rootfs.ext4" "${DEST_DIR}/rootfs.ext4"
+
+_log "Done."
+exit 0

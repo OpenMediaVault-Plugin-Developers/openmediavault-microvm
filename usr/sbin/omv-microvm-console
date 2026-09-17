@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-console — attach to a running microVM's live serial console.
+#
+# Thin wrapper around `dtach -a` for the socket omv-microvm-run creates.
+# Works standalone from a shell, independent of the cterm web terminal
+# integration. Detach with Ctrl+\ (the dtach default) without stopping
+# the VM; the session keeps running.
+#
+# Usage: omv-microvm-console <vm-name>
+
+set -uo pipefail
+
+VMNAME="${1:?usage: omv-microvm-console <vm-name>}"
+DTACH_SOCK="/run/openmediavault-microvm/${VMNAME}/console.dtach"
+
+if [ ! -S "$DTACH_SOCK" ]; then
+    echo "No running console session for '${VMNAME}' (expected socket at ${DTACH_SOCK})." >&2
+    echo "Is the VM running? Check: systemctl status omv-microvm@${VMNAME}.service" >&2
+    exit 1
+fi
+
+exec dtach -a "$DTACH_SOCK"

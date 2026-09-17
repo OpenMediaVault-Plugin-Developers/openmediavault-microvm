@@ -1,0 +1,42 @@
+#!/bin/bash
+# Install (or update) the Firecracker static binary.
+#
+# Firecracker has no Debian package, so this fetches the pinned static
+# binary release from GitHub and installs it to /usr/local/bin/firecracker.
+# Idempotent: does nothing if the requested version is already installed.
+#
+# Usage: omv-install-fc [version]
+set -e
+
+FC_VERSION="${1:-1.17.0}"
+FC_ARCH=$(uname -m)
+
+case "$FC_ARCH" in
+    x86_64|aarch64)
+        ;;
+    *)
+        echo "Error: Unsupported architecture '${FC_ARCH}'. Only x86_64 and aarch64 are supported." >&2
+        exit 1
+        ;;
+esac
+
+if /usr/local/bin/firecracker --version 2>/dev/null | grep -q "v${FC_VERSION}"; then
+    echo "Firecracker v${FC_VERSION} (${FC_ARCH}) is already installed."
+    exit 0
+fi
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+URL="https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/firecracker-v${FC_VERSION}-${FC_ARCH}.tgz"
+
+echo "Downloading Firecracker v${FC_VERSION} (${FC_ARCH})..."
+wget --quiet -O "${TMPDIR}/firecracker.tgz" "$URL"
+
+tar -xzf "${TMPDIR}/firecracker.tgz" -C "$TMPDIR"
+
+install -m 0755 \
+    "${TMPDIR}/release-v${FC_VERSION}-${FC_ARCH}/firecracker-v${FC_VERSION}-${FC_ARCH}" \
+    /usr/local/bin/firecracker
+
+echo "Installed Firecracker v${FC_VERSION} to /usr/local/bin/firecracker."
