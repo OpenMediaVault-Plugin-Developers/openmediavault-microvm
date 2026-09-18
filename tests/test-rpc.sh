@@ -787,6 +787,47 @@ else
 fi
 rm -rf "$FAKE_BACKUP_DIR"
 
+# syncBackupList reconciles the list file against what's actually on disk:
+# a row backed by a real directory (with rootfs.ext4) must survive, a row
+# whose directory is gone must be dropped, and a .bak copy of the original
+# list file must be left behind.
+SYNC_BACKUP_DIR=$(mktemp -d /tmp/omvtest-microvm-backup-sync.XXXXXX)
+SYNC_VALID_DIR="${SYNC_BACKUP_DIR}/omvtest_microvm/2020-01-01_00-00-00"
+mkdir -p "$SYNC_VALID_DIR"
+: > "${SYNC_VALID_DIR}/rootfs.ext4"
+SYNC_VALID_UUID=$(cat /proc/sys/kernel/random/uuid)
+SYNC_ORPHAN_UUID=$(cat /proc/sys/kernel/random/uuid)
+echo "${SYNC_VALID_UUID},${SYNC_BACKUP_DIR},omvtest_microvm,2020-01-01_00-00-00,0" >> /etc/omv-microvm-backup.list
+echo "${SYNC_ORPHAN_UUID},${SYNC_BACKUP_DIR},omvtest_microvm,2019-01-01_00-00-00,0" >> /etc/omv-microvm-backup.list
+
+SYNC_OUT=$(omv-rpc -u admin "MicroVm" "syncBackupList" '{}' 2>&1)
+if BG_RESULT=$(wait_bg "$SYNC_OUT" 30); then
+    _pass "syncBackupList"
+else
+    _fail "syncBackupList" "$(echo "$BG_RESULT" | tail -5)"
+fi
+
+if grep -q "^${SYNC_VALID_UUID}," /etc/omv-microvm-backup.list 2>/dev/null; then
+    _pass "syncBackupList keeps a row backed by a real directory"
+else
+    _fail "syncBackupList keeps a row backed by a real directory" "row missing after sync"
+fi
+
+if grep -q "^${SYNC_ORPHAN_UUID}," /etc/omv-microvm-backup.list 2>/dev/null; then
+    _fail "syncBackupList drops a row whose directory is gone" "orphaned row still present"
+else
+    _pass "syncBackupList drops a row whose directory is gone"
+fi
+
+if [ -f /etc/omv-microvm-backup.list.bak ]; then
+    _pass "syncBackupList leaves a .bak copy of the list file"
+else
+    _fail "syncBackupList leaves a .bak copy of the list file" "no .bak file found"
+fi
+
+sed -i "/^${SYNC_VALID_UUID},/d" /etc/omv-microvm-backup.list
+rm -rf "$SYNC_BACKUP_DIR"
+
 # ---------------------------------------------------------------------------
 # 8. Scheduled backup jobs
 # ---------------------------------------------------------------------------

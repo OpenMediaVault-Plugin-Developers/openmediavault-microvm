@@ -59,6 +59,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('doBackup');
         $this->registerMethod('restoreBackup');
         $this->registerMethod('deleteBackup');
+        $this->registerMethod('syncBackupList');
 
         $this->registerMethod('getJobList');
         $this->registerMethod('getJob');
@@ -963,6 +964,20 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                 sprintf('/^%s,/d', $params['uuid']), $listFile]);
             $cmd->execute();
         }
+    }
+
+    public function syncBackupList($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename) {
+            $cmd = new \OMV\System\Process('omv-microvm-sync-backups-list');
+            $cmd->setRedirect2to1();
+            $cmdLine = $cmd->getCommandLine();
+            if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                throw new \OMV\ExecException($cmdLine, $output);
+            }
+            return $output;
+        });
     }
 
     public function getJobList($params, $context)
