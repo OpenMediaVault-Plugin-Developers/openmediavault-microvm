@@ -1,0 +1,6 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/schedule"
+  title: _("Schedule")
+  component: omv-services-microvm-schedule-datatable-page

@@ -35,6 +35,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('getVmList');
         $this->registerMethod('getVm');
         $this->registerMethod('getVmNameStateList');
+        $this->registerMethod('enumerateVmNames');
         $this->registerMethod('getVmDetails');
         $this->registerMethod('getConsoleLog');
         $this->registerMethod('setVm');
@@ -52,6 +53,17 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('restoreSnapshot');
         $this->registerMethod('deleteSnapshot');
         $this->registerMethod('deleteAllSnapshots');
+
+        $this->registerMethod('getBackupList');
+        $this->registerMethod('doBackup');
+        $this->registerMethod('restoreBackup');
+        $this->registerMethod('deleteBackup');
+
+        $this->registerMethod('getJobList');
+        $this->registerMethod('getJob');
+        $this->registerMethod('setJob');
+        $this->registerMethod('deleteJob');
+        $this->registerMethod('doJob');
     }
 
     private function getStoragePath($context)
@@ -313,6 +325,20 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         }
         return $this->applyFilter($objects, $params['start'], $params['limit'],
             $params['sortfield'], $params['sortdir']);
+    }
+
+    public function enumerateVmNames($params, $context)
+    {
+        $this->validateMethodContext($context, ["role" => OMV_ROLE_ADMINISTRATOR]);
+        $db = \OMV\Config\Database::getInstance();
+        $objects = [];
+        foreach ($db->get("conf.service.microvm.vm") as $object) {
+            $objects[] = [
+                'uuid' => $object->get('uuid'),
+                'name' => $object->get('name')
+            ];
+        }
+        return $objects;
     }
 
     public function getVmDetails($params, $context)
@@ -743,5 +769,218 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             $rmCmd = new \OMV\System\Process('rm', ['-rf', $dir]);
             $rmCmd->execute();
         }
+    }
+
+    // Backups are similar to snapshots (same underlying capture/restore
+    // scripts) but write to an admin-chosen directory instead of the VM's
+    // own fixed snapshots dir, so a single browsable list can span many
+    // destinations. That needs an index outside any one VM's directory —
+    // /etc/omv-microvm-backup.list, appended to by omv-microvm-backup
+    // itself, one row per restore point: uuid,path,vmname,date,size.
+    private function backupListFile()
+    {
+        return '/etc/omv-microvm-backup.list';
+    }
+
+    public function getBackupList($params, $context)
+    {
+        $this->validateMethodContext($context, ["role" => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.getlist");
+        $objects = [];
+        $listFile = $this->backupListFile();
+        if (file_exists($listFile)) {
+            $lines = file($listFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if ($lines !== false) {
+                $rows = array_map('str_getcsv', $lines);
+                $header = ['uuid', 'path', 'vmname', 'date', 'size'];
+                foreach ($rows as $row) {
+                    if (count($row) < count($header)) {
+                        continue;
+                    }
+                    $object = array_combine($header, array_slice($row, 0, count($header)));
+                    $backupDir = sprintf('%s/%s/%s', rtrim($object['path'], '/'),
+                        $object['vmname'], $object['date']);
+                    $meta = [];
+                    $metaFile = sprintf('%s/meta.json', $backupDir);
+                    if (file_exists($metaFile)) {
+                        $decoded = json_decode(file_get_contents($metaFile), true);
+                        if (is_array($decoded)) {
+                            $meta = $decoded;
+                        }
+                    }
+                    $object['name'] = $meta['name'] ?? '';
+                    $object['notes'] = $meta['notes'] ?? '';
+                    $object['warm'] = $meta['warm'] ?? false;
+                    // Recompute size live from the current files rather than
+                    // trusting the stored value, which can go stale (e.g.
+                    // filesystem compression/sparseness settling after the
+                    // write).
+                    $size = 0;
+                    $found = false;
+                    foreach ((is_dir($backupDir) ? glob($backupDir . '/*') : []) as $f) {
+                        if (is_file($f)) {
+                            $size += @filesize($f) ?: 0;
+                            $found = true;
+                        }
+                    }
+                    if ($found) {
+                        $object['size'] = (string)$size;
+                    }
+                    $objects[] = $object;
+                }
+            }
+        }
+        return $this->applyFilter($objects, $params['start'], $params['limit'],
+            $params['sortfield'], $params['sortdir']);
+    }
+
+    public function doBackup($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, 'rpc.microvm.dobackup');
+        $path = $params['path'];
+        if (substr($path, 0, 1) !== '/') {
+            $path = '/' . $path;
+        }
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($params, $path) {
+                $cmdArgs = ['-v', $params['vmname'], '-d', $path];
+                if (!empty($params['keep'])) {
+                    $cmdArgs[] = '-k';
+                    $cmdArgs[] = (string)(int)$params['keep'];
+                }
+                if (!empty($params['name'])) {
+                    $cmdArgs[] = '-n';
+                    $cmdArgs[] = $params['name'];
+                }
+                if (!empty($params['notes'])) {
+                    $cmdArgs[] = '-N';
+                    $cmdArgs[] = $params['notes'];
+                }
+                $cmd = new \OMV\System\Process('/usr/sbin/omv-microvm-backup', $cmdArgs);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                return $output;
+            }
+        );
+    }
+
+    public function restoreBackup($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, 'rpc.microvm.restorebackup');
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get('conf.service.microvm.vm', $params['vmuuid']);
+        $name = $vm->get('name');
+        $unit = $this->unitName($name);
+        $backupDir = sprintf('%s/%s/%s', rtrim($params['path'], '/'),
+            $params['vmname'], $params['date']);
+        if (!is_dir($backupDir)) {
+            throw new \OMV\Exception(gettext("Backup not found."));
+        }
+
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($unit, $name, $backupDir) {
+                $this->systemctlQuiet(['stop', $unit]);
+                $cmd = new \OMV\System\Process('/usr/sbin/omv-microvm-snapshot-restore', [$name, $backupDir]);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                $this->systemctlCommand(['start', $unit], gettext("Failed to start VM after restore."));
+                return $output;
+            }
+        );
+    }
+
+    public function deleteBackup($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, 'rpc.microvm.backupentry');
+        $backupDir = sprintf('%s/%s/%s', rtrim($params['path'], '/'),
+            $params['vmname'], $params['date']);
+        if (is_dir($backupDir) && strlen($backupDir) > 2) {
+            $rmCmd = new \OMV\System\Process('rm', ['-rf', $backupDir]);
+            $rmCmd->execute();
+        }
+        $listFile = $this->backupListFile();
+        if (file_exists($listFile)) {
+            $cmd = new \OMV\System\Process('sed', ['-i',
+                sprintf('/^%s,/d', $params['uuid']), $listFile]);
+            $cmd->execute();
+        }
+    }
+
+    public function getJobList($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.getlist");
+        $db = \OMV\Config\Database::getInstance();
+        $objects = $db->getAssoc("conf.service.microvm.job");
+        return $this->applyFilter($objects, $params['start'], $params['limit'],
+            $params['sortfield'], $params['sortdir']);
+    }
+
+    public function getJob($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.objectuuid");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.job", $params['uuid']);
+        return $object->getAssoc();
+    }
+
+    public function setJob($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.setjob");
+        $db = \OMV\Config\Database::getInstance();
+        $object = new \OMV\Config\ConfigObject("conf.service.microvm.job");
+        if (substr($params['path'], 0, 1) !== '/') {
+            $params['path'] = '/' . $params['path'];
+        }
+        $object->setAssoc($params);
+        $db->set($object);
+        $this->applyChanges($context);
+        return $object->getAssoc();
+    }
+
+    public function deleteJob($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.objectuuid");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.job", $params['uuid']);
+        $db->delete($object);
+        $this->applyChanges($context);
+        return $object->getAssoc();
+    }
+
+    public function doJob($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.objectuuid");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.job", $params['uuid']);
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($object) {
+                $cmdArgs = ['-v', $object->get('vmname'), '-d', $object->get('path')];
+                if ($object->get('keep') > 0) {
+                    $cmdArgs[] = '-k';
+                    $cmdArgs[] = (string)$object->get('keep');
+                }
+                $cmd = new \OMV\System\Process('/usr/sbin/omv-microvm-backup', $cmdArgs);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                return $output;
+            }
+        );
     }
 }

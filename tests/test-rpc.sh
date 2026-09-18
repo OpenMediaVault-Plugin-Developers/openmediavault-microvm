@@ -151,6 +151,7 @@ OMV_NEW_UUID=$(grep -oP 'OMV_CONFIGOBJECT_NEW_UUID="\K[^"]+' /etc/default/openme
     || echo "fa4b1c66-ef79-11e5-87a0-0002b3a176b4")
 
 VM_UUID=""
+JOB_UUID=""
 
 pre_cleanup() {
     local list='{"start":0,"limit":100,"sortfield":"name","sortdir":"ASC"}'
@@ -172,6 +173,10 @@ for r in rows:
 
 cleanup() {
     section "Cleanup"
+    if [ -n "$JOB_UUID" ]; then
+        info "Deleting test job $JOB_UUID"
+        omv-rpc -u admin "MicroVm" "deleteJob" "{\"uuid\":\"$JOB_UUID\"}" >/dev/null 2>&1 || true
+    fi
     if [ -n "$VM_UUID" ]; then
         info "Deleting test VM $VM_UUID"
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"delete\"}" >/dev/null 2>&1 || true
@@ -596,6 +601,186 @@ else
     _skip "deleteAllSnapshots (removes multiple fabricated snapshots)" "no vm uuid or shared folder"
     _skip "deleteAllSnapshots actually removes every directory" "no vm uuid or shared folder"
 fi
+
+# ---------------------------------------------------------------------------
+# 6. Backups
+# ---------------------------------------------------------------------------
+section "Backups"
+
+assert_rpc "getBackupList" "MicroVm" "getBackupList" \
+    '{"start":0,"limit":25,"sortfield":"vmname","sortdir":"ASC"}' '"total"'
+
+assert_rpc_fails "doBackup (missing vmname)" "MicroVm" "doBackup" '{"path":"/tmp"}'
+assert_rpc_fails "doBackup (missing path)" "MicroVm" "doBackup" '{"vmname":"omvtest_microvm"}'
+
+# Real end-to-end round trip: back up the (now stopped) test VM's disk to a
+# throwaway directory, mutate the live disk, restore from the backup, and
+# verify byte-for-byte via host-side checksums — mirrors the snapshot round
+# trip above but through the backup list file / arbitrary destination path.
+BACKUP_TEST_DIR=$(mktemp -d /tmp/omvtest-microvm-backup.XXXXXX)
+
+if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
+    info "Running a real cold backup/restore round trip against the test VM ..."
+
+    BACKUP_OUT=$(omv-rpc -u admin "MicroVm" "doBackup" \
+        "{\"vmname\":\"omvtest_microvm\",\"path\":\"$BACKUP_TEST_DIR\",\"name\":\"omvtest-backup\",\"notes\":\"\"}" 2>&1)
+    if BG_RESULT=$(wait_bg "$BACKUP_OUT" 60); then
+        _pass "doBackup (cold, real)"
+    else
+        _fail "doBackup (cold, real)" "$(echo "$BG_RESULT" | tail -5)"
+    fi
+
+    BACKUP_DATE_DIR=$(find "${BACKUP_TEST_DIR}/omvtest_microvm" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -n1)
+    BACKUP_DATE=$(basename "${BACKUP_DATE_DIR:-}")
+
+    if [ -n "$BACKUP_DATE" ]; then
+        assert_rpc "getBackupList (finds the real backup)" "MicroVm" "getBackupList" \
+            '{"start":0,"limit":100,"sortfield":"vmname","sortdir":"ASC"}' 'omvtest-backup'
+
+        BACKUP_CHECKSUM=$(md5sum "${BACKUP_DATE_DIR}/rootfs.ext4" 2>/dev/null | awk '{print $1}')
+
+        MNT=$(mktemp -d)
+        if mount -o loop "${SF_PATH%/}/vms/omvtest_microvm/rootfs.ext4" "$MNT" 2>/dev/null; then
+            touch "${MNT}/omvtest-post-backup-marker" 2>/dev/null
+            umount "$MNT"
+            _pass "Modified the live disk after the backup (mount+touch)"
+        else
+            _fail "Modified the live disk after the backup (mount+touch)" "loop mount failed"
+        fi
+        rmdir "$MNT" 2>/dev/null || true
+
+        RESTORE_OUT=$(omv-rpc -u admin "MicroVm" "restoreBackup" \
+            "{\"vmuuid\":\"$VM_UUID\",\"path\":\"$BACKUP_TEST_DIR\",\"vmname\":\"omvtest_microvm\",\"date\":\"$BACKUP_DATE\"}" 2>&1)
+        if BG_RESULT=$(wait_bg "$RESTORE_OUT" 60); then
+            _pass "restoreBackup (cold)"
+        else
+            _fail "restoreBackup (cold)" "$(echo "$BG_RESULT" | tail -5)"
+        fi
+
+        RESTORED_CHECKSUM=$(vm_checksum)
+        if [ -n "$BACKUP_CHECKSUM" ] && [ "$RESTORED_CHECKSUM" = "$BACKUP_CHECKSUM" ]; then
+            _pass "Restored disk exactly matches the backup"
+        else
+            _fail "Restored disk exactly matches the backup" "backup=$BACKUP_CHECKSUM restored=$RESTORED_CHECKSUM"
+        fi
+
+        if wait_for_state running 60; then
+            _pass "VM boots successfully after being restored from backup"
+        else
+            _fail "VM boots successfully after being restored from backup" "state=$(vm_state) after waiting"
+        fi
+        omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+
+        BACKUP_UUID=$(grep ",${BACKUP_TEST_DIR%/}/\\?,omvtest_microvm,${BACKUP_DATE}," /etc/omv-microvm-backup.list 2>/dev/null | head -1 | cut -d, -f1)
+        if [ -n "$BACKUP_UUID" ]; then
+            assert_rpc "deleteBackup (real)" "MicroVm" "deleteBackup" \
+                "{\"uuid\":\"$BACKUP_UUID\",\"path\":\"$BACKUP_TEST_DIR\",\"vmname\":\"omvtest_microvm\",\"date\":\"$BACKUP_DATE\"}"
+            if [ -d "$BACKUP_DATE_DIR" ]; then
+                _fail "deleteBackup actually removes the directory" "still exists: $BACKUP_DATE_DIR"
+            else
+                _pass "deleteBackup actually removes the directory"
+            fi
+        else
+            _skip "deleteBackup (real)" "could not find list-file uuid for the backup"
+        fi
+    else
+        _fail "getBackupList (finds the real backup)" "could not find backup directory under $BACKUP_TEST_DIR"
+        _skip "restoreBackup (cold)" "could not find backup directory"
+    fi
+else
+    _skip "real backup/restore round trip" "no vm uuid or no downloaded image"
+fi
+rm -rf "$BACKUP_TEST_DIR"
+
+# getBackupList/deleteBackup are driven by the flat list file plus whatever
+# is actually on disk — exercise them against a hand-fabricated entry too,
+# independent of the real round trip above.
+FAKE_BACKUP_DIR=$(mktemp -d /tmp/omvtest-microvm-backup-fake.XXXXXX)
+FAKE_VM_DIR="${FAKE_BACKUP_DIR}/omvtest_microvm/2020-01-01_00-00-00"
+mkdir -p "$FAKE_VM_DIR"
+: > "${FAKE_VM_DIR}/rootfs.ext4"
+cat > "${FAKE_VM_DIR}/meta.json" <<EOF
+{"name":"omvtest-fake-backup","notes":"fabricated by test-rpc.sh","created":"$(date -Iseconds)","size_bytes":0,"warm":false}
+EOF
+FAKE_BACKUP_UUID=$(cat /proc/sys/kernel/random/uuid)
+echo "${FAKE_BACKUP_UUID},${FAKE_BACKUP_DIR},omvtest_microvm,2020-01-01_00-00-00,0" >> /etc/omv-microvm-backup.list
+
+assert_rpc "getBackupList (finds a fabricated backup)" "MicroVm" "getBackupList" \
+    '{"start":0,"limit":100,"sortfield":"vmname","sortdir":"ASC"}' 'omvtest-fake-backup'
+
+assert_rpc "deleteBackup (removes a fabricated backup)" "MicroVm" "deleteBackup" \
+    "{\"uuid\":\"$FAKE_BACKUP_UUID\",\"path\":\"$FAKE_BACKUP_DIR\",\"vmname\":\"omvtest_microvm\",\"date\":\"2020-01-01_00-00-00\"}"
+
+if [ -d "$FAKE_VM_DIR" ] || grep -q "^${FAKE_BACKUP_UUID}," /etc/omv-microvm-backup.list 2>/dev/null; then
+    _fail "deleteBackup actually removes the directory and list entry" "leftover state"
+else
+    _pass "deleteBackup actually removes the directory and list entry"
+fi
+rm -rf "$FAKE_BACKUP_DIR"
+
+# ---------------------------------------------------------------------------
+# 7. Scheduled backup jobs
+# ---------------------------------------------------------------------------
+section "Scheduled backup jobs"
+
+JOB_PARAMS=$(python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$OMV_NEW_UUID',
+    'enable': True,
+    'vmname': 'omvtest_microvm',
+    'path': '/tmp',
+    'keep': 3,
+    'sendemail': False,
+    'emailonerror': False,
+    'comment': 'RPC test job',
+    'execution': 'daily',
+    'minute': '0',
+    'everynminute': False,
+    'hour': '3',
+    'everynhour': False,
+    'month': '*',
+    'dayofmonth': '*',
+    'everyndayofmonth': False,
+    'dayofweek': '*'
+}))
+")
+assert_rpc "setJob (create)" "MicroVm" "setJob" "$JOB_PARAMS"
+JOB_UUID=$(json_uuid "$RPC_OUT")
+info "Created job uuid=$JOB_UUID"
+
+if [ -n "$JOB_UUID" ]; then
+    assert_rpc "getJob" "MicroVm" "getJob" "{\"uuid\":\"$JOB_UUID\"}" '"omvtest_microvm"'
+    assert_rpc "getJobList" "MicroVm" "getJobList" \
+        '{"start":0,"limit":25,"sortfield":"vmname","sortdir":"ASC"}' '"total"'
+
+    UPDATE_JOB_PARAMS=$(echo "$JOB_PARAMS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['uuid'] = '$JOB_UUID'
+d['keep'] = 5
+print(json.dumps(d))
+")
+    assert_rpc "setJob (update)" "MicroVm" "setJob" "$UPDATE_JOB_PARAMS" 'updated\|"keep":\s*5\|"keep": 5'
+
+    assert_rpc "deleteJob" "MicroVm" "deleteJob" "{\"uuid\":\"$JOB_UUID\"}"
+    JOB_UUID=""
+else
+    _skip "getJob" "no job uuid"
+    _skip "getJobList" "no job uuid"
+    _skip "setJob (update)" "no job uuid"
+    _skip "deleteJob" "no job uuid"
+fi
+
+assert_rpc_fails "setJob (missing execution)" "MicroVm" "setJob" "$(python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$OMV_NEW_UUID', 'enable': True, 'vmname': 'x', 'path': '/tmp'
+}))")"
+
+assert_rpc_fails "getJob (bad uuid)" "MicroVm" "getJob" '{"uuid":"00000000-0000-0000-0000-000000000000"}'
+
+assert_rpc_fails "doJob (bad uuid)" "MicroVm" "doJob" '{"uuid":"00000000-0000-0000-0000-000000000000"}'
 
 # ---------------------------------------------------------------------------
 # Summary

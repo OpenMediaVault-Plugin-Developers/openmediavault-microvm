@@ -1,0 +1,7 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/schedule/create"
+  title: _("Create")
+  notificationTitle: _("Created scheduled backup job.")
+  component: omv-services-microvm-schedule-form-page

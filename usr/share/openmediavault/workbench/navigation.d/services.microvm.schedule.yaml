@@ -1,0 +1,8 @@
+version: "1.0"
+type: navigation-item
+data:
+  path: "services.microvm.schedule"
+  text: _("Schedule")
+  position: 40
+  icon: mdi:calendar-clock
+  url: "/services/microvm/schedule"

@@ -1,0 +1,8 @@
+version: "1.0"
+type: navigation-item
+data:
+  path: "services.microvm.backup"
+  text: _("Backup")
+  position: 30
+  icon: mdi:backup-restore
+  url: "/services/microvm/backup"

@@ -30,6 +30,7 @@ if ! omv_config_exists "/config/services/microvm"; then
     omv_config_add_key "/config/services/microvm" "install_cterm" "1"
     omv_config_add_node "/config/services/microvm" "vms"
     omv_config_add_node "/config/services/microvm" "images"
+    omv_config_add_node "/config/services/microvm" "jobs"
 fi
 
 # Add keys that may be missing on upgrade.
@@ -50,6 +51,9 @@ if ! omv_config_exists "/config/services/microvm/vms"; then
 fi
 if ! omv_config_exists "/config/services/microvm/images"; then
     omv_config_add_node "/config/services/microvm" "images"
+fi
+if ! omv_config_exists "/config/services/microvm/jobs"; then
+    omv_config_add_node "/config/services/microvm" "jobs"
 fi
 
 exit 0

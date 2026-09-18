@@ -38,6 +38,11 @@ class OMVModuleMicroVm extends \OMV\Engine\Module\ServiceAbstract
             "org.openmediavault.conf.service.microvm.vm",
             [ $this, "setDirty" ]
         );
+        $dispatcher->addListener(
+            OMV_NOTIFY_CREATE | OMV_NOTIFY_MODIFY | OMV_NOTIFY_DELETE,
+            "org.openmediavault.conf.service.microvm.job",
+            [ $this, "setDirty" ]
+        );
         // Deliberately no listener on conf.service.microvm.image: the image
         // library is read directly from confdb by omv-microvm-run at VM
         // start time, not rendered by salt, so downloading/deleting an

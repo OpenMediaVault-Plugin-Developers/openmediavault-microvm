@@ -17,6 +17,7 @@
 
 {% set config = salt['omv_conf.get']('conf.service.microvm') %}
 {% set vms = salt['omv_conf.get']('conf.service.microvm.vm') %}
+{% set jobs = salt['omv_conf.get']('conf.service.microvm.job') %}
 {% set fc_version = '1.17.0' %}
 
 # Skipped mid-dpkg-transaction (e.g. this plugin's own postinst) — calling
@@ -58,6 +59,33 @@ configure_microvm_logrotate:
     - name: /etc/logrotate.d/openmediavault-microvm
     - contents: |
         /var/log/openmediavault-microvm.log {
+          monthly
+          missingok
+          rotate 12
+          compress
+          notifempty
+        }
+    - user: root
+    - group: root
+    - mode: '0644'
+
+configure_microvm_backup_cron:
+  file.managed:
+    - name: "/etc/cron.d/omv-microvm-backup"
+    - source:
+      - salt://{{ tpldir }}/files/backup-jobs.j2
+    - template: jinja
+    - context:
+        jobs: {{ jobs | json }}
+    - user: root
+    - group: root
+    - mode: '0644'
+
+configure_microvm_backup_logrotate:
+  file.managed:
+    - name: /etc/logrotate.d/omv-microvm-backup
+    - contents: |
+        /var/log/omv-microvm-backup.log {
           monthly
           missingok
           rotate 12
