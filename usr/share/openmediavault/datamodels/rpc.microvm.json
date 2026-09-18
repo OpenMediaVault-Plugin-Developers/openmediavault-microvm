@@ -126,6 +126,25 @@
   },
   {
     "type": "rpc",
+    "id": "rpc.microvm.resizedisk",
+    "params": {
+      "type": "object",
+      "properties": {
+        "vmuuid": {
+          "type": "string",
+          "format": "uuidv4",
+          "required": true
+        },
+        "size_mib": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "required": true
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
     "id": "rpc.microvm.downloadimage",
     "params": {
       "type": "object",
@@ -244,9 +263,8 @@
           "required": true
         },
         "keep": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 65535
+          "type": "string",
+          "pattern": "^[0-9]+$"
         },
         "name": {
           "type": "string"

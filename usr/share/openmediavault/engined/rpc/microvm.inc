@@ -40,6 +40,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('getConsoleLog');
         $this->registerMethod('setVm');
         $this->registerMethod('doCommand');
+        $this->registerMethod('resizeDisk');
 
         $this->registerMethod('getImageList');
         $this->registerMethod('enumerateImages');
@@ -294,6 +295,9 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             $assoc['image_desc'] = $imageNames[$assoc['imageref']] ?? gettext("(unknown image)");
             $assoc['termurl'] = $this->getConsoleTermUrl($assoc['name'], $assoc['state'], $context);
             $assoc['snapshot_count'] = count($this->listSnapshots($context, $object));
+            $rootfsPath = sprintf("%s/%s/rootfs.ext4", $this->vmsDir($context), $assoc['name']);
+            $assoc['disk_size_mib'] = file_exists($rootfsPath)
+                ? (int) ceil(filesize($rootfsPath) / 1048576) : null;
             $objects[] = $assoc;
         }
         return $this->applyFilter($objects, $params['start'], $params['limit'],
@@ -459,6 +463,52 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                 break;
         }
         return $object->getAssoc();
+    }
+
+    public function resizeDisk($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.resizedisk");
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
+        $name = $vm->get('name');
+        $state = $this->getActiveState($name);
+        if ($state !== 'stopped') {
+            throw new \OMV\Exception(sprintf(
+                gettext("VM '%s' is %s; it must be stopped before its disk can be resized."), $name, $state));
+        }
+        $rootfsPath = sprintf("%s/%s/rootfs.ext4", $this->vmsDir($context), $name);
+        if (!file_exists($rootfsPath)) {
+            throw new \OMV\Exception(sprintf(
+                gettext("VM '%s' has never been started; there is no disk to resize yet."), $name));
+        }
+        // size_mib arrives as a numeric string, not an integer: it's rendered
+        // through the workbench's Nunjucks-based param templating (see
+        // omv-services-microvm-vm-datatable-page.yaml's "Resize disk"
+        // taskDialog), which always produces a string — same reason
+        // rpc.backup.doPurge's "keep" is a string param, not an integer.
+        $sizeMib = (int) $params['size_mib'];
+        if ($sizeMib < 128 || $sizeMib > 1048576) {
+            throw new \OMV\Exception(gettext("New size must be between 128 and 1048576 MiB."));
+        }
+        $currentMib = (int) ceil(filesize($rootfsPath) / 1048576);
+        if ($sizeMib <= $currentMib) {
+            throw new \OMV\Exception(sprintf(
+                gettext("New size (%d MiB) must be larger than the current disk size (%d MiB). Shrinking is not supported."),
+                $sizeMib, $currentMib));
+        }
+
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($name, $sizeMib) {
+                $cmd = new \OMV\System\Process('omv-microvm-resize-disk', [$name, $sizeMib]);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                return $output;
+            }
+        );
     }
 
     private function systemctlCommand($args, $errorMsg)

@@ -603,7 +603,76 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Backups
+# 6. Disk resize
+# ---------------------------------------------------------------------------
+section "Disk resize"
+
+assert_rpc_fails "resizeDisk (missing vmuuid)" "MicroVm" "resizeDisk" '{"size_mib":"2048"}'
+
+assert_rpc_fails "resizeDisk (bad vm uuid)" "MicroVm" "resizeDisk" \
+    '{"vmuuid":"00000000-0000-0000-0000-000000000000","size_mib":"2048"}'
+
+if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
+    # Independent of whatever state the snapshot round trip above left the
+    # VM in — resize always requires 'stopped'.
+    omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+    wait_for_state stopped 30 || true
+
+    RESIZE_ROOTFS="${SF_PATH%/}/vms/omvtest_microvm/rootfs.ext4"
+    CURRENT_MIB=$(( $(stat -c%s "$RESIZE_ROOTFS" 2>/dev/null || echo 0) / 1048576 ))
+
+    if [ "$CURRENT_MIB" -gt 0 ]; then
+        assert_rpc_fails "resizeDisk (shrink rejected)" "MicroVm" "resizeDisk" \
+            "{\"vmuuid\":\"$VM_UUID\",\"size_mib\":\"${CURRENT_MIB}\"}"
+
+        assert_rpc "doCommand start (for resize-while-running check)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
+        wait_for_state running 60 || true
+        assert_rpc_fails "resizeDisk (VM running)" "MicroVm" "resizeDisk" \
+            "{\"vmuuid\":\"$VM_UUID\",\"size_mib\":\"$((CURRENT_MIB + 256))\"}"
+
+        assert_rpc "doCommand stop (before real resize)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}"
+        wait_for_state stopped 30 || true
+
+        NEW_MIB=$((CURRENT_MIB + 256))
+        RESIZE_OUT=$(omv-rpc -u admin "MicroVm" "resizeDisk" \
+            "{\"vmuuid\":\"$VM_UUID\",\"size_mib\":\"${NEW_MIB}\"}" 2>&1)
+        if BG_RESULT=$(wait_bg "$RESIZE_OUT" 60); then
+            _pass "resizeDisk (grow, real disk)"
+        else
+            _fail "resizeDisk (grow, real disk)" "$(echo "$BG_RESULT" | tail -5)"
+        fi
+
+        RESIZED_MIB=$(( $(stat -c%s "$RESIZE_ROOTFS" 2>/dev/null || echo 0) / 1048576 ))
+        if [ "$RESIZED_MIB" -eq "$NEW_MIB" ]; then
+            _pass "Rootfs file grew to the requested size"
+        else
+            _fail "Rootfs file grew to the requested size" "expected ${NEW_MIB} MiB, got ${RESIZED_MIB} MiB"
+        fi
+
+        if e2fsck -fn "$RESIZE_ROOTFS" >/dev/null 2>&1; then
+            _pass "Filesystem is clean after resize"
+        else
+            _fail "Filesystem is clean after resize" "e2fsck reported errors"
+        fi
+    else
+        _skip "resizeDisk (shrink rejected)" "rootfs missing/empty"
+        _skip "resizeDisk (VM running)" "rootfs missing/empty"
+        _skip "resizeDisk (grow, real disk)" "rootfs missing/empty"
+        _skip "Rootfs file grew to the requested size" "rootfs missing/empty"
+        _skip "Filesystem is clean after resize" "rootfs missing/empty"
+    fi
+else
+    _skip "resizeDisk (shrink rejected)" "no vm uuid or real image"
+    _skip "resizeDisk (VM running)" "no vm uuid or real image"
+    _skip "resizeDisk (grow, real disk)" "no vm uuid or real image"
+    _skip "Rootfs file grew to the requested size" "no vm uuid or real image"
+    _skip "Filesystem is clean after resize" "no vm uuid or real image"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Backups
 # ---------------------------------------------------------------------------
 section "Backups"
 
@@ -719,7 +788,7 @@ fi
 rm -rf "$FAKE_BACKUP_DIR"
 
 # ---------------------------------------------------------------------------
-# 7. Scheduled backup jobs
+# 8. Scheduled backup jobs
 # ---------------------------------------------------------------------------
 section "Scheduled backup jobs"
 

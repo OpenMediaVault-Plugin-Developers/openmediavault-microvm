@@ -38,6 +38,10 @@ data:
         prop: memory_mib
         flexGrow: 1
         sortable: true
+      - name: _("Disk (MiB)")
+        prop: disk_size_mib
+        flexGrow: 1
+        sortable: true
       - name: _("Image")
         prop: image_desc
         flexGrow: 2
@@ -95,6 +99,55 @@ data:
               arg0:
                 prop: termurl
               arg1: ""
+      - type: iconButton
+        icon: mdi:harddisk-plus
+        tooltip: _("Resize disk")
+        enabledConstraints:
+          minSelected: 1
+          maxSelected: 1
+          constraint:
+            - operator: ne
+              arg0:
+                prop: state
+              arg1: "running"
+        execute:
+          type: formDialog
+          formDialog:
+            title: _("Resize disk ...")
+            fields:
+              - type: hidden
+                name: vmuuid
+                value: "{{ _selected[0].uuid }}"
+              - type: textInput
+                name: current_size
+                label: _("Current size (MiB)")
+                value: "{{ _selected[0].disk_size_mib }}"
+                readonly: true
+                submitValue: false
+              - type: numberInput
+                name: size_mib
+                label: _("New size (MiB)")
+                hint: _("Must be larger than the current size — this only grows the disk, it never shrinks it. The VM must be stopped.")
+                validators:
+                  min: 128
+                  max: 1048576
+                  patternType: integer
+                  required: true
+            buttons:
+              submit:
+                text: _("Resize")
+                execute:
+                  type: taskDialog
+                  taskDialog:
+                    config:
+                      title: _("Resizing disk ...")
+                      startOnInit: true
+                      request:
+                        service: MicroVm
+                        method: resizeDisk
+                        params:
+                          vmuuid: "{{ vmuuid }}"
+                          size_mib: "{{ size_mib }}"
       - type: menu
         icon: mdi:camera-outline
         tooltip: _("Snapshots")
