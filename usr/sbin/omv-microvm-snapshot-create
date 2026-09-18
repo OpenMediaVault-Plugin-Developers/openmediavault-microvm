@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-snapshot-create — snapshot a VM's disk into <snapshot-dir>.
+# If it's running, also pauses it and dumps memory/device state first
+# (warm snapshot); if not, just copies the disk (cold snapshot).
+#
+# Usage: omv-microvm-snapshot-create <vm-name> <snapshot-dir>
+
+set -euo pipefail
+
+VMNAME="${1:?usage: omv-microvm-snapshot-create <vm-name> <snapshot-dir>}"
+SNAPSHOT_DIR="${2:?usage: omv-microvm-snapshot-create <vm-name> <snapshot-dir>}"
+
+_log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
+}
+
+die() {
+    _log "ERROR: $*"
+    exit 1
+}
+
+# Must match the derivation in omv-microvm-run.
+RUN_DIR="/run/openmediavault-microvm/${VMNAME}"
+SOCKET_PATH="${RUN_DIR}/firecracker.socket"
+
+# Must match the derivation in omv-microvm-run.
+SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
+SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
+[ -n "$SF_UUID" ] || die "No shared folder configured for VM storage."
+SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" | jq -r '.')
+[ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
+VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+ROOTFS_PATH="${VM_DIR}/rootfs.ext4"
+[ -f "$ROOTFS_PATH" ] || die "Rootfs missing: ${ROOTFS_PATH}"
+
+mkdir -p "$SNAPSHOT_DIR"
+
+if [ ! -S "$SOCKET_PATH" ]; then
+    _log "VM not running — copying disk only (cold snapshot)."
+    cp --reflink=auto "$ROOTFS_PATH" "${SNAPSHOT_DIR}/rootfs.ext4"
+    _log "Snapshot complete."
+    exit 0
+fi
+
+_fc_api() {
+    # _fc_api <method> <path> <json-body>
+    local method=$1 path=$2 body=$3 http_code resp
+    resp=$(mktemp)
+    http_code=$(curl -sS --unix-socket "$SOCKET_PATH" -o "$resp" \
+        -w '%{http_code}' -X "$method" "http://localhost${path}" \
+        -H 'Content-Type: application/json' -d "$body") || { rm -f "$resp"; die "Firecracker API request failed: ${method} ${path}"; }
+    if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+        _log "Firecracker API error (${http_code}): $(cat "$resp")"
+        rm -f "$resp"
+        die "Firecracker API request rejected: ${method} ${path} (HTTP ${http_code})"
+    fi
+    rm -f "$resp"
+}
+
+# Always resume on exit if we paused — a failure partway through must
+# never leave the VM frozen. Cleared once the explicit resume succeeds.
+PAUSED=0
+on_exit() {
+    if [ "$PAUSED" -eq 1 ]; then
+        _log "Resuming VM after a failed snapshot attempt ..."
+        curl -sS --unix-socket "$SOCKET_PATH" -X PATCH 'http://localhost/vm' \
+            -H 'Content-Type: application/json' -d '{"state":"Resumed"}' >/dev/null 2>&1 || true
+    fi
+}
+trap on_exit EXIT
+
+_log "Pausing VM ..."
+_fc_api PATCH /vm '{"state":"Paused"}'
+PAUSED=1
+
+_log "Writing snapshot to ${SNAPSHOT_DIR} ..."
+_fc_api PUT /snapshot/create "$(jq -n \
+    --arg mem "${SNAPSHOT_DIR}/memfile" \
+    --arg state "${SNAPSHOT_DIR}/vmstate" \
+    '{"mem_file_path": $mem, "snapshot_path": $state, "snapshot_type": "Full"}')"
+
+# Before resuming, so the disk copy stays consistent with the memory dump.
+_log "Copying disk ..."
+cp --reflink=auto "$ROOTFS_PATH" "${SNAPSHOT_DIR}/rootfs.ext4"
+
+_log "Resuming VM ..."
+_fc_api PATCH /vm '{"state":"Resumed"}'
+PAUSED=0
+
+_log "Snapshot complete."
+exit 0

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# omv-microvm-stop-cleanup — tear down the TAP device for a microVM.
+# omv-microvm-stop-cleanup — tear down the TAP device and run directory
+# for a microVM.
 #
 # Invoked as `ExecStopPost=/usr/sbin/omv-microvm-stop-cleanup %i` by the
 # omv-microvm@.service systemd template unit, after firecracker has exited.
@@ -17,5 +18,10 @@ TAP_NAME="mvm-$(echo -n "$VMNAME" | md5sum | cut -c1-10)"
 if ip link show "$TAP_NAME" >/dev/null 2>&1; then
     ip link del "$TAP_NAME"
 fi
+
+# The API socket file isn't removed by the kernel when Firecracker exits —
+# it just becomes stale, still passing a bare `-S` check with nothing
+# listening. Remove it so a stopped VM has no leftover socket to confuse.
+rm -f "/run/openmediavault-microvm/${VMNAME}/firecracker.socket"
 
 exit 0

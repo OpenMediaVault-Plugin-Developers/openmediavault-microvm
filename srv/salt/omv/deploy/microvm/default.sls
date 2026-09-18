@@ -19,11 +19,9 @@
 {% set vms = salt['omv_conf.get']('conf.service.microvm.vm') %}
 {% set fc_version = '1.17.0' %}
 
-# Skipped while dpkg is mid-transaction (e.g. this plugin's own postinst):
-# apt's own dependency resolution already handles openmediavault-cterm as a
-# Recommends on first install, and calling out to apt again from inside a
-# running dpkg transaction is unsafe. A later salt run (settings change,
-# scheduled apply, ...) picks this up outside of that context.
+# Skipped mid-dpkg-transaction (e.g. this plugin's own postinst) — calling
+# apt from inside a running transaction is unsafe; a later salt run picks
+# it up.
 {% if config.install_cterm and not salt['environ.get']('DPKG_MAINTSCRIPT_PACKAGE', '') %}
 microvm_install_cterm:
   pkg.installed:

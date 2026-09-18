@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-snapshot-restore — overwrite a VM's disk with a snapshot's
+# saved disk, and mark it for a warm (memory-state) boot if the snapshot
+# has one. Called after the VM's unit is stopped; does not start it back up.
+#
+# Usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>
+
+set -euo pipefail
+
+VMNAME="${1:?usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>}"
+SNAPSHOT_DIR="${2:?usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>}"
+
+_log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
+}
+
+die() {
+    _log "ERROR: $*"
+    exit 1
+}
+
+[ -f "${SNAPSHOT_DIR}/rootfs.ext4" ] || die "Snapshot is incomplete: missing ${SNAPSHOT_DIR}/rootfs.ext4"
+
+# Must match the derivation in omv-microvm-run.
+SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
+SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
+[ -n "$SF_UUID" ] || die "No shared folder configured for VM storage."
+SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" | jq -r '.')
+[ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
+VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+mkdir -p "$VM_DIR"
+
+_log "Overwriting current disk with snapshot's saved disk ..."
+cp --reflink=auto "${SNAPSHOT_DIR}/rootfs.ext4" "${VM_DIR}/rootfs.ext4"
+
+# Only warm snapshots (with memory/device state) need the next start to
+# load them over the API — a cold snapshot is just a disk, so a normal
+# cold boot afterward is already correct.
+if [ -f "${SNAPSHOT_DIR}/vmstate" ] && [ -f "${SNAPSHOT_DIR}/memfile" ]; then
+    printf '%s' "$SNAPSHOT_DIR" > "${VM_DIR}/.restore_from"
+fi
+
+_log "Ready to restore from ${SNAPSHOT_DIR}."
+exit 0

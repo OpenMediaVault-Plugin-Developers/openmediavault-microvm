@@ -46,6 +46,12 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('downloadImage');
         $this->registerMethod('downloadCatalogImage');
         $this->registerMethod('deleteImage');
+
+        $this->registerMethod('enumerateSnapshots');
+        $this->registerMethod('createSnapshot');
+        $this->registerMethod('restoreSnapshot');
+        $this->registerMethod('deleteSnapshot');
+        $this->registerMethod('deleteAllSnapshots');
     }
 
     private function getStoragePath($context)
@@ -72,17 +78,18 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         return sprintf("%s/images", $this->getStoragePath($context));
     }
 
+    private function snapshotsDir($context, $vmName)
+    {
+        return sprintf("%s/%s/snapshots", $this->vmsDir($context), $vmName);
+    }
+
     private function unitName($name)
     {
         return sprintf("omv-microvm@%s.service", $name);
     }
 
-    // The string a VM's `imageref` field stores and matches against —
-    // name+arch, plus a version suffix when the image record has one. This
-    // is a natural key (also used as the image's directory name) rather
-    // than the image's own internal confdb uuid, so a VM's raw config is
-    // self-describing without a join against the image table, and stays
-    // valid even if the image row is later deleted.
+    // Natural key ("name-arch[-version]") a VM's imageref matches against,
+    // rather than the image row's own confdb uuid.
     private function imageRef($object)
     {
         $version = trim($object->get('version'));
@@ -92,8 +99,6 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         return sprintf("%s-%s-%s", $object->get('name'), $object->get('arch'), $version);
     }
 
-    // Human-readable label for an image, e.g. "ubuntu-24.04 (x86_64,
-    // fc1.15-5.10.245)" or "ubuntu-24.04 (x86_64)" when it has no version.
     private function imageDesc($object)
     {
         $version = trim($object->get('version'));
@@ -276,6 +281,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             $assoc['state'] = $this->getActiveState($object->get('name'));
             $assoc['image_desc'] = $imageNames[$assoc['imageref']] ?? gettext("(unknown image)");
             $assoc['termurl'] = $this->getConsoleTermUrl($assoc['name'], $assoc['state'], $context);
+            $assoc['snapshot_count'] = count($this->listSnapshots($context, $object));
             $objects[] = $assoc;
         }
         return $this->applyFilter($objects, $params['start'], $params['limit'],
@@ -357,9 +363,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         if (TRUE === $isNew) {
             $db->assertIsUnique($object, "name");
         } else {
-            // The frontend disables the Image field once a VM exists (a
-            // booted VM ignores it anyway — see omv-microvm-run), but
-            // enforce it here too against direct RPC/API use.
+            // Enforce server-side too, against direct RPC/API use.
             $existing = $db->get("conf.service.microvm.vm", $object->get('uuid'));
             if ($existing->get('imageref') !== $object->get('imageref')) {
                 throw new \OMV\Exception(gettext(
@@ -534,11 +538,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $object->set('arch', $arch);
         $object->set('version', $version);
         $ref = $this->imageRef($object);
-        // Uniqueness is on (name, arch, version), not name alone — the same
-        // base image (e.g. "ubuntu-24.04") legitimately exists once per
-        // architecture, and again once per version, and VMs/omv-microvm-run
-        // reference an image by this ref string, not by its confdb uuid, so
-        // a shared name across arches/versions is fine.
+        // Unique on (name, arch, version), not name alone.
         $db->assertIsUniqueByFilter($object, [
             "operator" => "and",
             "arg0" => ["operator" => "stringEquals", "arg0" => "name", "arg1" => $name],
@@ -582,12 +582,8 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $db = \OMV\Config\Database::getInstance();
         $object = $db->get("conf.service.microvm.image", $params['uuid']);
         $ref = $this->imageRef($object);
-        // A VM only needs the shared image files for its first boot —
-        // omv-microvm-run copies both the kernel and rootfs into the VM's
-        // own directory the first time it starts, and uses that private
-        // copy on every start after that. So an image referenced by a VM
-        // that has already booted is safe to delete; only a VM that hasn't
-        // taken its own copy yet would be left unable to start.
+        // Safe to delete once a referencing VM has its own kernel/rootfs
+        // copy (see omv-microvm-run) — only a never-booted VM still needs it.
         foreach ($db->get("conf.service.microvm.vm") as $vm) {
             if ($vm->get('imageref') !== $ref) {
                 continue;
@@ -610,5 +606,142 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         // No applyChanges: like the image download path, nothing in salt
         // consumes the image library, so there's no config to re-apply.
         $db->delete($object);
+    }
+
+    // Snapshots aren't tracked in confdb (like openmediavault-kvm's own
+    // snapshot feature) — each is just VM_DIR/snapshots/<id>/ with a
+    // meta.json sidecar, so deleting a VM's directory cleans them up too.
+    private function listSnapshots($context, $vm)
+    {
+        $dir = $this->snapshotsDir($context, $vm->get('name'));
+        $objects = [];
+        foreach (glob(sprintf("%s/*/meta.json", $dir)) as $metaFile) {
+            $meta = json_decode(file_get_contents($metaFile), true);
+            if (!is_array($meta)) {
+                continue;
+            }
+            $meta['id'] = basename(dirname($metaFile));
+            $objects[] = $meta;
+        }
+        return $objects;
+    }
+
+    public function enumerateSnapshots($params, $context)
+    {
+        $this->validateMethodContext($context, ["role" => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.enumeratesnapshots");
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
+        $objects = [];
+        foreach ($this->listSnapshots($context, $vm) as $snap) {
+            $objects[] = [
+                'snapshotid' => $snap['id'],
+                'desc' => sprintf("%s (%s)", $snap['name'] ?? '', $snap['created'] ?? '')
+            ];
+        }
+        return $objects;
+    }
+
+    public function createSnapshot($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.createsnapshot");
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
+        $name = $vm->get('name');
+        $state = $this->getActiveState($name);
+        if (!in_array($state, ['running', 'stopped'], true)) {
+            throw new \OMV\Exception(sprintf(
+                gettext("VM '%s' is %s; must be running or stopped to take a snapshot."), $name, $state));
+        }
+        // 'stopped' also covers a VM that has never been started — it gets
+        // its own rootfs copy only on first boot (see omv-microvm-run), so
+        // there's nothing to snapshot yet.
+        $rootfsPath = sprintf("%s/%s/rootfs.ext4", $this->vmsDir($context), $name);
+        if (!file_exists($rootfsPath)) {
+            throw new \OMV\Exception(sprintf(
+                gettext("VM '%s' has never been started; there is nothing to snapshot yet."), $name));
+        }
+        $snapshotId = bin2hex(random_bytes(8));
+        $snapshotDir = sprintf("%s/%s", $this->snapshotsDir($context, $name), $snapshotId);
+        $snapshotName = $params['name'];
+        $notes = $params['notes'] ?? '';
+
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($name, $snapshotDir, $snapshotName, $notes) {
+                $cmd = new \OMV\System\Process('omv-microvm-snapshot-create', [$name, $snapshotDir]);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                $size = 0;
+                foreach (['memfile', 'vmstate', 'rootfs.ext4'] as $f) {
+                    $size += @filesize(sprintf("%s/%s", $snapshotDir, $f)) ?: 0;
+                }
+                $meta = [
+                    'name' => $snapshotName,
+                    'notes' => $notes,
+                    'created' => date('c'),
+                    'size_bytes' => $size
+                ];
+                file_put_contents(sprintf("%s/meta.json", $snapshotDir), json_encode($meta));
+                return $output;
+            }
+        );
+    }
+
+    public function restoreSnapshot($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.snapshot");
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
+        $name = $vm->get('name');
+        $unit = $this->unitName($name);
+        $snapshotDir = sprintf("%s/%s", $this->snapshotsDir($context, $name), $params['snapshotid']);
+        if (!is_dir($snapshotDir)) {
+            throw new \OMV\Exception(sprintf(gettext("Snapshot '%s' not found."), $params['snapshotid']));
+        }
+
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($unit, $name, $snapshotDir) {
+                $this->systemctlQuiet(['stop', $unit]);
+                $cmd = new \OMV\System\Process('omv-microvm-snapshot-restore', [$name, $snapshotDir]);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                $this->systemctlCommand(['start', $unit], gettext("Failed to start VM after restore."));
+                return $output;
+            }
+        );
+    }
+
+    public function deleteSnapshot($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.snapshot");
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
+        $snapshotDir = sprintf("%s/%s", $this->snapshotsDir($context, $vm->get('name')), $params['snapshotid']);
+        if (is_dir($snapshotDir)) {
+            $rmCmd = new \OMV\System\Process('rm', ['-rf', $snapshotDir]);
+            $rmCmd->execute();
+        }
+    }
+
+    public function deleteAllSnapshots($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.enumeratesnapshots");
+        $db = \OMV\Config\Database::getInstance();
+        $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
+        $dir = $this->snapshotsDir($context, $vm->get('name'));
+        if (is_dir($dir)) {
+            $rmCmd = new \OMV\System\Process('rm', ['-rf', $dir]);
+            $rmCmd->execute();
+        }
     }
 }

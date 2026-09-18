@@ -42,6 +42,10 @@ data:
         prop: image_desc
         flexGrow: 2
         sortable: true
+      - name: _("Snapshots")
+        prop: snapshot_count
+        flexGrow: 1
+        sortable: true
       - name: _("Bridge")
         prop: bridge
         flexGrow: 1
@@ -91,6 +95,170 @@ data:
               arg0:
                 prop: termurl
               arg1: ""
+      - type: menu
+        icon: mdi:camera-outline
+        tooltip: _("Snapshots")
+        enabledConstraints:
+          minSelected: 1
+          maxSelected: 1
+        actions:
+          - text: _("Create")
+            icon: mdi:camera-plus-outline
+            execute:
+              type: formDialog
+              formDialog:
+                title: _("Create snapshot ...")
+                fields:
+                  - type: hidden
+                    name: vmuuid
+                    value: "{{ _selected[0].uuid }}"
+                  - type: textInput
+                    name: name
+                    label: _("Name")
+                    validators:
+                      required: true
+                  - type: textarea
+                    name: notes
+                    label: _("Notes")
+                    value: ""
+                    rows: 3
+                buttons:
+                  submit:
+                    text: _("Create")
+                    execute:
+                      type: taskDialog
+                      taskDialog:
+                        config:
+                          title: _("Creating snapshot ...")
+                          startOnInit: true
+                          request:
+                            service: MicroVm
+                            method: createSnapshot
+                            params:
+                              vmuuid: "{{ vmuuid }}"
+                              name: "{{ name }}"
+                              notes: "{{ notes }}"
+          - text: _("Restore")
+            icon: mdi:restore
+            enabledConstraints:
+              minSelected: 1
+              maxSelected: 1
+              constraint:
+                - operator: gt
+                  arg0:
+                    prop: snapshot_count
+                  arg1: 0
+            confirmationDialogConfig:
+              template: confirmation-danger
+              message: _("Restoring a snapshot stops the VM, permanently overwrites its current disk with the selected snapshot's saved disk, and boots from the snapshot's saved memory state if it has one. Any changes made since the snapshot was taken will be lost. Continue?")
+            execute:
+              type: formDialog
+              formDialog:
+                title: _("Restore snapshot ...")
+                fields:
+                  - type: hidden
+                    name: vmuuid
+                    value: "{{ _selected[0].uuid }}"
+                  - type: select
+                    name: snapshotid
+                    label: _("Snapshot")
+                    placeholder: _("Select a snapshot ...")
+                    textField: desc
+                    valueField: snapshotid
+                    store:
+                      proxy:
+                        service: MicroVm
+                        get:
+                          method: enumerateSnapshots
+                          params:
+                            vmuuid: "{{ _selected[0].uuid }}"
+                    validators:
+                      required: true
+                buttons:
+                  submit:
+                    text: _("Restore")
+                    execute:
+                      type: taskDialog
+                      taskDialog:
+                        config:
+                          title: _("Restoring snapshot ...")
+                          startOnInit: true
+                          request:
+                            service: MicroVm
+                            method: restoreSnapshot
+                            params:
+                              vmuuid: "{{ vmuuid }}"
+                              snapshotid: "{{ snapshotid }}"
+          - text: _("Delete")
+            icon: mdi:delete-outline
+            enabledConstraints:
+              minSelected: 1
+              maxSelected: 1
+              constraint:
+                - operator: gt
+                  arg0:
+                    prop: snapshot_count
+                  arg1: 0
+            execute:
+              type: formDialog
+              formDialog:
+                title: _("Delete snapshot ...")
+                fields:
+                  - type: hidden
+                    name: vmuuid
+                    value: "{{ _selected[0].uuid }}"
+                  - type: select
+                    name: snapshotid
+                    label: _("Snapshot")
+                    placeholder: _("Select a snapshot ...")
+                    textField: desc
+                    valueField: snapshotid
+                    store:
+                      proxy:
+                        service: MicroVm
+                        get:
+                          method: enumerateSnapshots
+                          params:
+                            vmuuid: "{{ _selected[0].uuid }}"
+                    validators:
+                      required: true
+                buttons:
+                  submit:
+                    text: _("Delete")
+                    execute:
+                      type: request
+                      request:
+                        service: MicroVm
+                        method: deleteSnapshot
+                        params:
+                          vmuuid: "{{ vmuuid }}"
+                          snapshotid: "{{ snapshotid }}"
+                        progressMessage: _("Deleting ...")
+                        successNotification: _("Deleted.")
+                        task: false
+          - text: _("Delete All")
+            icon: mdi:delete-sweep-outline
+            enabledConstraints:
+              minSelected: 1
+              maxSelected: 1
+              constraint:
+                - operator: gt
+                  arg0:
+                    prop: snapshot_count
+                  arg1: 0
+            confirmationDialogConfig:
+              template: confirmation-critical
+              message: _("Are you sure you want to delete all snapshots for this VM?")
+            execute:
+              type: request
+              request:
+                service: MicroVm
+                method: deleteAllSnapshots
+                params:
+                  vmuuid: "{{ _selected[0].uuid }}"
+                progressMessage: _("Deleting all snapshots ...")
+                successNotification: _("All snapshots have been deleted.")
+                task: false
       - type: menu
         icon: mdi:power
         tooltip: _("State")

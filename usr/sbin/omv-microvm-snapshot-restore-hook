@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-snapshot-restore-hook — ExecStartPost hook that loads a
+# snapshot into the "empty" Firecracker process omv-microvm-run just
+# started in restore mode. No-op on every normal start.
+#
+# A failed load here fails the whole start job (KillMode=control-group
+# kills Firecracker too), landing the unit in "failed" — which
+# getActiveState() already maps to the UI's "error" state.
+#
+# Usage: omv-microvm-snapshot-restore-hook <vm-name>
+
+set -euo pipefail
+
+VMNAME="${1:?usage: omv-microvm-snapshot-restore-hook <vm-name>}"
+
+_log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
+}
+
+die() {
+    _log "ERROR: $*"
+    exit 1
+}
+
+# Must match the derivation in omv-microvm-run.
+SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
+SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
+[ -n "$SF_UUID" ] || exit 0
+SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" 2>/dev/null | jq -r '.' || echo "")
+[ -n "$SF_PATH" ] || exit 0
+VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+MARKER="${VM_DIR}/.restore_from"
+
+[ -f "$MARKER" ] || exit 0
+
+SNAPSHOT_DIR=$(cat "$MARKER")
+_log "Restore marker present — loading snapshot from ${SNAPSHOT_DIR} ..."
+
+# Must match the derivation in omv-microvm-run.
+RUN_DIR="/run/openmediavault-microvm/${VMNAME}"
+SOCKET_PATH="${RUN_DIR}/firecracker.socket"
+
+for _ in $(seq 1 50); do
+    [ -S "$SOCKET_PATH" ] && break
+    sleep 0.1
+done
+[ -S "$SOCKET_PATH" ] || die "API socket never appeared: ${SOCKET_PATH}"
+
+BODY=$(jq -n \
+    --arg mem "${SNAPSHOT_DIR}/memfile" \
+    --arg state "${SNAPSHOT_DIR}/vmstate" \
+    '{
+        "mem_backend": {"backend_type": "File", "backend_path": $mem},
+        "snapshot_path": $state,
+        "resume_vm": true
+    }')
+
+resp=$(mktemp)
+http_code=$(curl -sS --unix-socket "$SOCKET_PATH" -o "$resp" -w '%{http_code}' \
+    -X PUT 'http://localhost/snapshot/load' \
+    -H 'Content-Type: application/json' -d "$BODY") || { rm -f "$resp"; die "Firecracker API request failed: PUT /snapshot/load"; }
+
+if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+    _log "Firecracker API error (${http_code}): $(cat "$resp")"
+    rm -f "$resp"
+    die "Snapshot load rejected (HTTP ${http_code}) — leaving marker in place for diagnosis."
+fi
+rm -f "$resp"
+
+# Only removed on success, so a failed load stays diagnosable instead of
+# silently falling back to a cold boot next time.
+rm -f "$MARKER"
+_log "Snapshot loaded and VM resumed."
+exit 0

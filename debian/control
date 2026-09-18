@@ -9,7 +9,8 @@ Homepage: http://omv-extras.org/
 
 Package: openmediavault-microvm
 Architecture: all
-Depends: dtach,
+Depends: curl,
+         dtach,
          e2fsprogs,
          openmediavault (>= 8),
          openmediavault-sharerootfs,
