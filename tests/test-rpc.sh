@@ -152,6 +152,7 @@ OMV_NEW_UUID=$(grep -oP 'OMV_CONFIGOBJECT_NEW_UUID="\K[^"]+' /etc/default/openme
 
 VM_UUID=""
 JOB_UUID=""
+NETWORK_UUID=""
 
 pre_cleanup() {
     local list='{"start":0,"limit":100,"sortfield":"name","sortdir":"ASC"}'
@@ -169,6 +170,21 @@ for r in rows:
         info "Pre-cleanup: removing leftover test VM ($existing)"
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$existing\",\"command\":\"delete\"}" >/dev/null 2>&1 || true
     fi
+
+    local existing_net
+    existing_net=$(omv-rpc -u admin "MicroVm" "getNetworkList" '{"start":0,"limit":100,"sortfield":"name","sortdir":"ASC"}' 2>/dev/null \
+        | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+rows = d.get('data', d) if isinstance(d, dict) else d
+for r in rows:
+    if r.get('name') == 'omvtest_network':
+        print(r['uuid'])
+" 2>/dev/null || echo "")
+    if [ -n "$existing_net" ]; then
+        info "Pre-cleanup: removing leftover test network ($existing_net)"
+        omv-rpc -u admin "MicroVm" "deleteNetwork" "{\"uuid\":\"$existing_net\"}" >/dev/null 2>&1 || true
+    fi
 }
 
 cleanup() {
@@ -180,6 +196,10 @@ cleanup() {
     if [ -n "$VM_UUID" ]; then
         info "Deleting test VM $VM_UUID"
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"delete\"}" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$NETWORK_UUID" ]; then
+        info "Deleting test network $NETWORK_UUID"
+        omv-rpc -u admin "MicroVm" "deleteNetwork" "{\"uuid\":\"$NETWORK_UUID\"}" >/dev/null 2>&1 || true
     fi
     echo "" >&2
     info "Deploying pending config changes asynchronously (clears web UI banner)"
@@ -203,7 +223,7 @@ if [ -n "$SETTINGS" ]; then
     SET_PARAMS=$(echo "$SETTINGS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-keep = ['enable', 'sharedfolderref', 'default_bridge', 'install_cterm']
+keep = ['enable', 'sharedfolderref', 'install_cterm']
 out = {k: d[k] for k in keep if k in d}
 print(json.dumps(out))
 " 2>/dev/null)
@@ -241,6 +261,67 @@ section "Networking"
 assert_rpc "enumerateBridges" "MicroVm" "enumerateBridges" '{}'
 
 # ---------------------------------------------------------------------------
+# 2b. Networks — CRUD
+# ---------------------------------------------------------------------------
+section "Networks"
+
+TEST_NETWORK_NAME="omvtest_network"
+
+NETWORK_PARAMS=$(python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$OMV_NEW_UUID',
+    'name': '$TEST_NETWORK_NAME',
+    'type': 'bridge',
+    'bridge': 'br0',
+    'subnet': '',
+    'dhcp': True,
+    'notes': 'RPC test network'
+}))
+")
+assert_rpc "setNetwork (create, bridge type)" "MicroVm" "setNetwork" "$NETWORK_PARAMS"
+NETWORK_UUID=$(json_uuid "$RPC_OUT")
+info "Created network uuid=$NETWORK_UUID"
+
+if [ -n "$NETWORK_UUID" ]; then
+    assert_rpc "getNetwork" "MicroVm" "getNetwork" "{\"uuid\":\"$NETWORK_UUID\"}" "$TEST_NETWORK_NAME"
+    assert_rpc "getNetworkList" "MicroVm" "getNetworkList" \
+        '{"start":0,"limit":25,"sortfield":"name","sortdir":"ASC"}' '"total"'
+
+    UPDATE_NETWORK_PARAMS=$(echo "$NETWORK_PARAMS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['uuid'] = '$NETWORK_UUID'
+d['notes'] = 'RPC test network - updated'
+print(json.dumps(d))
+")
+    assert_rpc "setNetwork (update)" "MicroVm" "setNetwork" "$UPDATE_NETWORK_PARAMS" 'updated'
+else
+    _skip "getNetwork" "no network uuid"
+    _skip "getNetworkList" "no network uuid"
+    _skip "setNetwork (update)" "no network uuid"
+fi
+
+assert_rpc_fails "setNetwork (bridge type, missing bridge)" "MicroVm" "setNetwork" "$(python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$OMV_NEW_UUID', 'name': 'omvtest_bad_network', 'type': 'bridge',
+    'bridge': '', 'subnet': '', 'dhcp': True, 'notes': ''
+}))")"
+
+assert_rpc_fails "setNetwork (nat type, bad subnet)" "MicroVm" "setNetwork" "$(python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$OMV_NEW_UUID', 'name': 'omvtest_bad_network2', 'type': 'nat',
+    'bridge': '', 'subnet': 'not-a-subnet', 'dhcp': True, 'notes': ''
+}))")"
+
+assert_rpc_fails "getNetwork (bad uuid)" "MicroVm" "getNetwork" '{"uuid":"00000000-0000-0000-0000-000000000000"}'
+
+# Deliberately left in place (not deleted here) — the VM tests below
+# reference it via networkref; cleanup() removes it after the VM.
+
+# ---------------------------------------------------------------------------
 # 3. VMs — CRUD
 # ---------------------------------------------------------------------------
 section "VMs"
@@ -263,7 +344,7 @@ print(json.dumps({
     'vcpus': 1,
     'memory_mib': 512,
     'imageref': '$TEST_IMAGE_REF',
-    'bridge': 'br0',
+    'networkref': '$TEST_NETWORK_NAME',
     'macaddr': '',
     'bootargs': 'console=ttyS0 reboot=k panic=1 pci=off',
     'notes': 'RPC test VM'
@@ -286,7 +367,7 @@ print(json.dumps({
     'vcpus': 2,
     'memory_mib': 1024,
     'imageref': '$TEST_IMAGE_REF',
-    'bridge': 'br0',
+    'networkref': '$TEST_NETWORK_NAME',
     'macaddr': '',
     'bootargs': 'console=ttyS0 reboot=k panic=1 pci=off',
     'notes': 'RPC test VM - updated'
@@ -350,7 +431,7 @@ assert_rpc_fails "setVm (missing name)" "MicroVm" "setVm" "$(python3 -c "
 import json
 print(json.dumps({
     'uuid': '$OMV_NEW_UUID', 'name': '', 'enable': True, 'autostart': False,
-    'vcpus': 1, 'memory_mib': 512, 'imageref': '', 'bridge': '',
+    'vcpus': 1, 'memory_mib': 512, 'imageref': '', 'networkref': '',
     'macaddr': '', 'bootargs': '', 'notes': ''
 }))")"
 
@@ -786,6 +867,47 @@ else
     _pass "deleteBackup actually removes the directory and list entry"
 fi
 rm -rf "$FAKE_BACKUP_DIR"
+
+# syncBackupList reconciles the list file against what's actually on disk:
+# a row backed by a real directory (with rootfs.ext4) must survive, a row
+# whose directory is gone must be dropped, and a .bak copy of the original
+# list file must be left behind.
+SYNC_BACKUP_DIR=$(mktemp -d /tmp/omvtest-microvm-backup-sync.XXXXXX)
+SYNC_VALID_DIR="${SYNC_BACKUP_DIR}/omvtest_microvm/2020-01-01_00-00-00"
+mkdir -p "$SYNC_VALID_DIR"
+: > "${SYNC_VALID_DIR}/rootfs.ext4"
+SYNC_VALID_UUID=$(cat /proc/sys/kernel/random/uuid)
+SYNC_ORPHAN_UUID=$(cat /proc/sys/kernel/random/uuid)
+echo "${SYNC_VALID_UUID},${SYNC_BACKUP_DIR},omvtest_microvm,2020-01-01_00-00-00,0" >> /etc/omv-microvm-backup.list
+echo "${SYNC_ORPHAN_UUID},${SYNC_BACKUP_DIR},omvtest_microvm,2019-01-01_00-00-00,0" >> /etc/omv-microvm-backup.list
+
+SYNC_OUT=$(omv-rpc -u admin "MicroVm" "syncBackupList" '{}' 2>&1)
+if BG_RESULT=$(wait_bg "$SYNC_OUT" 30); then
+    _pass "syncBackupList"
+else
+    _fail "syncBackupList" "$(echo "$BG_RESULT" | tail -5)"
+fi
+
+if grep -q "^${SYNC_VALID_UUID}," /etc/omv-microvm-backup.list 2>/dev/null; then
+    _pass "syncBackupList keeps a row backed by a real directory"
+else
+    _fail "syncBackupList keeps a row backed by a real directory" "row missing after sync"
+fi
+
+if grep -q "^${SYNC_ORPHAN_UUID}," /etc/omv-microvm-backup.list 2>/dev/null; then
+    _fail "syncBackupList drops a row whose directory is gone" "orphaned row still present"
+else
+    _pass "syncBackupList drops a row whose directory is gone"
+fi
+
+if [ -f /etc/omv-microvm-backup.list.bak ]; then
+    _pass "syncBackupList leaves a .bak copy of the list file"
+else
+    _fail "syncBackupList leaves a .bak copy of the list file" "no .bak file found"
+fi
+
+sed -i "/^${SYNC_VALID_UUID},/d" /etc/omv-microvm-backup.list
+rm -rf "$SYNC_BACKUP_DIR"
 
 # ---------------------------------------------------------------------------
 # 8. Scheduled backup jobs
