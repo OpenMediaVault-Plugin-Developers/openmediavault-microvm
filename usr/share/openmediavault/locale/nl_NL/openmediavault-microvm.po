@@ -1,0 +1,655 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the openmediavault-microvm package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+# 
+# Translators:
+# Stephan Paternotte <stephan@paternottes.net>, 2026
+# 
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: openmediavault-microvm\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-20 16:38+0000\n"
+"PO-Revision-Date: 2026-09-18 16:05+0000\n"
+"Last-Translator: Stephan Paternotte <stephan@paternottes.net>, 2026\n"
+"Language-Team: Dutch (https://app.transifex.com/openmediavault-plugin-developers/teams/1854/nl/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: nl\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "(no console output yet)"
+msgstr "(nog geen console-uitvoer)"
+
+msgid "(unknown image)"
+msgstr "(onbekend image)"
+
+msgid "A bridge device must be selected for a host bridge network."
+msgstr ""
+
+msgid "A subnet is required for a private NAT network."
+msgstr ""
+
+msgid ""
+"A warm backup includes the VM's memory/device state, not just its disk."
+msgstr ""
+"Een warme back-up bevat de geheugen-/apparaatstatus van de VM, niet alleen "
+"de schijf."
+
+msgid "Add new VM"
+msgstr "Nieuwe VM toevoegen"
+
+msgid "All snapshots have been deleted."
+msgstr "Alle momentopnames zijn verwijderd."
+
+msgid ""
+"Also used as the systemd instance name and to derive the TAP device name."
+msgstr ""
+"Wordt ook gebruikt als de naam van de systemd-instantie en om de naam van "
+"het TAP-apparaat af te leiden."
+
+msgid "An image '%s' already exists."
+msgstr "Een image '%s' bestaat al."
+
+msgid "Arch"
+msgstr "Arch"
+
+msgid "Architecture"
+msgstr "Architectuur"
+
+msgid "Are you sure you want to delete all snapshots for this VM?"
+msgstr "Weet u zeker dat u alle momentopnames voor deze VM wilt verwijderen?"
+
+msgid ""
+"Are you sure you want to delete this VM? Its working directory (writable "
+"rootfs copy) will also be removed."
+msgstr ""
+"Weet u zeker dat u deze VM wilt verwijderen? De werkmap (schrijfbare rootfs-"
+"kopie) wordt ook verwijderd."
+
+msgid "Are you sure you want to delete this backup?"
+msgstr "Weet u zeker dat u deze back-up wilt verwijderen?"
+
+msgid "AutoStart"
+msgstr "AutoStart"
+
+msgid "Autostart has been disabled."
+msgstr "Autostart is uitgeschakeld."
+
+msgid "Autostart has been enabled."
+msgstr "Autostart is ingeschakeld."
+
+msgid "Autostart on boot"
+msgstr "Autostart bij opstarten"
+
+msgid "Back up a VM ..."
+msgstr "Back-up maken van VM…"
+
+msgid "Backing up VM ..."
+msgstr "Back-up maken van VM…"
+
+msgid "Backup"
+msgstr "Back-up"
+
+msgid "Backup not found."
+msgstr "Back-up niet gevonden."
+
+msgid "Backup now"
+msgstr "Nu back-up maken"
+
+msgid "Boot arguments"
+msgstr "Boot-argumenten"
+
+msgid "Bridge"
+msgstr "Bridge"
+
+msgid "Call"
+msgstr "Oproep"
+
+msgid "Catalog entry not found."
+msgstr "Catalogusvermelding niet gevonden."
+
+msgid "Component"
+msgstr "Component"
+
+msgid "Console"
+msgstr "Console"
+
+msgid "Console log (last 200 lines)"
+msgstr "Console-logboek (laatste 200 regels)"
+
+msgid "Create"
+msgstr "Aanmaken"
+
+msgid "Create VM"
+msgstr "VM aanmaken"
+
+msgid "Create snapshot ..."
+msgstr "Momentopname maken…"
+
+msgid "Created VM."
+msgstr "VM aangemaakt."
+
+msgid "Created network."
+msgstr ""
+
+msgid "Created scheduled backup job."
+msgstr "Geplande back-uptaak aangemaakt."
+
+msgid "Creating snapshot ..."
+msgstr "Momentopname maken…"
+
+msgid "Current size (MiB)"
+msgstr "Huidige grootte (MiB)"
+
+msgid "DHCP"
+msgstr ""
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "Date & Time"
+msgstr "Datum & tijd"
+
+msgid "Delete"
+msgstr "Verwijderen"
+
+msgid "Delete All"
+msgstr "Alles verwijderen"
+
+msgid "Delete snapshot ..."
+msgstr "Momentopname verwijderen…"
+
+msgid "Deleted."
+msgstr "Verwijderd."
+
+msgid "Deleting ..."
+msgstr "Verwijderen…"
+
+msgid "Deleting all snapshots ..."
+msgstr "Alle momentopnames verwijderen…"
+
+msgid "Destination directory"
+msgstr "Bestemmingsmap"
+
+msgid "Details"
+msgstr "Details"
+
+msgid "Direct link to a raw/ext4 rootfs image."
+msgstr "Directe link naar een raw/ext4 rootfs image."
+
+msgid "Direct link to an uncompressed vmlinux kernel binary."
+msgstr "Directe link naar een uncompressed vmlinux kernel binary."
+
+msgid "Disable"
+msgstr "Uitschakelen"
+
+msgid "Disabling autostart ..."
+msgstr "Autostart uitschakelen…"
+
+msgid "Disk (MiB)"
+msgstr "Schijf (MiB)"
+
+msgid "Download"
+msgstr "Downloaden"
+
+msgid "Download from URL"
+msgstr "Downloaden van URL"
+
+msgid "Download from catalog"
+msgstr "Downloaden van catalogus"
+
+msgid "Download image from URL ..."
+msgstr "Image downloaden van URL…"
+
+msgid "Download image from catalog ..."
+msgstr "Image downloaden van catalogus…"
+
+msgid "Downloading image ..."
+msgstr "Image downloaden…"
+
+msgid "Edit"
+msgstr "Bewerken"
+
+msgid "Edit VM"
+msgstr "VM bewerken"
+
+msgid "Edit VM."
+msgstr "VM bewerken."
+
+msgid "Edit network."
+msgstr ""
+
+msgid "Edit scheduled backup job."
+msgstr "Geplande back-uptaak bewerken."
+
+msgid "Edit settings."
+msgstr "Instellingen bewerken."
+
+msgid "Enable"
+msgstr "Inschakelen"
+
+msgid "Enabled"
+msgstr "Ingeschakeld"
+
+msgid "Enabling autostart ..."
+msgstr "Autostart inschakelen…"
+
+msgid "Executing scheduled backup ..."
+msgstr "Geplande back-up uitvoeren…"
+
+msgid "Failed to force stop VM."
+msgstr "Geforceerd stoppen van VM is mislukt."
+
+msgid "Failed to restart VM."
+msgstr "Opnieuw starten van VM is mislukt."
+
+msgid "Failed to start VM after restore."
+msgstr "Starten van VM na herstel is mislukt."
+
+msgid "Failed to start VM."
+msgstr "Starten van VM is mislukt."
+
+msgid "Failed to stop VM."
+msgstr "Stoppen van VM is mislukt."
+
+msgid "Firecracker"
+msgstr "Firecracker"
+
+msgid "Force stop"
+msgstr "Geforceerd stoppen"
+
+msgid "Force stopped."
+msgstr "Geforceerd gestopt."
+
+msgid "Forcing stop ..."
+msgstr "Geforceerd stoppen…"
+
+msgid "Host bridge"
+msgstr ""
+
+msgid ""
+"Host bridge attaches VMs on this network directly to an existing bridge "
+"device, giving them LAN visibility. Private NAT creates an isolated internal"
+" network with outbound internet access via NAT; VMs on it aren't directly "
+"reachable from the LAN."
+msgstr ""
+
+msgid "Image"
+msgstr "Image"
+
+msgid ""
+"Image '%s' is still needed by VM '%s', which hasn't booted yet and would "
+"fail to start without it."
+msgstr ""
+"Image '%s' is nog steeds nodig voor VM '%s', die nog niet is opgestart en "
+"zonder deze niet zou kunnen starten."
+
+msgid "Images"
+msgstr "Images"
+
+msgid "Imported"
+msgstr "Geïmporteerd"
+
+msgid "Install cterm"
+msgstr "cterm installeren"
+
+msgid "Installed version"
+msgstr "Geïnstalleerde versie"
+
+msgid ""
+"Installs the cterm plugin, which provides the web-based VM console/terminal "
+"link. Disable if you manage cterm yourself or don't want a console link."
+msgstr ""
+"Installeert de cterm-plug-in, die de webgebaseerde VM-console/terminal-link "
+"biedt. Schakel uit als u cterm zelf beheert of geen consolekoppeling wilt."
+
+msgid "Keep"
+msgstr "Bewaren"
+
+msgid "Keep Recent"
+msgstr "Recente bewaren"
+
+msgid ""
+"Keep console=ttyS0 — removing it (or pointing it elsewhere) silences the "
+"guest's serial console. The VM will still boot and run fine, but the Console"
+" log and the cterm terminal will show nothing."
+msgstr ""
+"console=ttyS0 bewaren — verwijderen (of ergens anders naar toe wijzen) maakt"
+" de seriële console van de gast stil. De VM zal nog steeds prima opstarten "
+"en werken, maar het Console-logboek en de cterm-terminal laten niets zien."
+
+msgid ""
+"Keep the most recent number of backups for this VM in this directory. 0 "
+"keeps all."
+msgstr ""
+"Bewaar het meest recente aantal back-ups voor deze VM in deze map. 0 bewaart"
+" alles."
+
+msgid "Kernel URL"
+msgstr "Kernel-URL"
+
+msgid "Kernel path"
+msgstr "Kernel-pad"
+
+msgid "Leave blank for a Firecracker-assigned address."
+msgstr "Laat leeg voor een door Firecracker toegewezen adres."
+
+msgid "MAC address"
+msgstr "MAC-adres"
+
+msgid "Memory (MiB)"
+msgstr "Geheugen (MiB)"
+
+msgid "Message"
+msgstr "Bericht"
+
+msgid "MicroVM"
+msgstr "MicroVM"
+
+msgid "MicroVMs"
+msgstr "MicroVM's"
+
+msgid ""
+"Must be larger than the current size — this only grows the disk, it never "
+"shrinks it. The VM must be stopped."
+msgstr ""
+"Moet groter zijn dan de huidige grootte — hierdoor groeit alleen de schijf, "
+"deze krimpt nooit. De VM moet gestopt worden."
+
+msgid "Name"
+msgstr "Naam"
+
+msgid "Network"
+msgstr ""
+
+msgid "Network '%s' does not exist."
+msgstr ""
+
+msgid "Network '%s' is still used by VM '%s'. Change that VM's network first."
+msgstr ""
+
+msgid "Networks"
+msgstr ""
+
+msgid ""
+"New size (%d MiB) must be larger than the current disk size (%d MiB). "
+"Shrinking is not supported."
+msgstr ""
+"Nieuwe grootte (%d MiB) moet groter zijn dan de huidige schijfgrootte (%d "
+"MiB). Krimpen wordt niet ondersteund."
+
+msgid "New size (MiB)"
+msgstr "Nieuwe grootte (MiB)"
+
+msgid "New size must be between 128 and 1048576 MiB."
+msgstr "Nieuwe grootte moet tussen 128 en 1048576 MiB liggen."
+
+msgid "Not installed"
+msgstr "Niet geïnstalleerd"
+
+msgid "Notes"
+msgstr "Notities"
+
+msgid "Open live console"
+msgstr "Live console openen"
+
+msgid "Optional label for this backup."
+msgstr "Optioneel label voor deze back-up."
+
+msgid ""
+"Optional. Lets this image coexist with other versions of the same "
+"name/architecture, e.g. when downloading a newer build later."
+msgstr ""
+"Optioneel. Laat deze image naast andere versies met dezelfde "
+"naam/architectuur bestaan, bijv. bij het later downloaden van een nieuwere "
+"build."
+
+msgid "Path"
+msgstr "Pad"
+
+msgid "Please set a shared folder for VM/image storage on the Settings tab."
+msgstr ""
+"Stel een gedeelde map in voor VM/image-opslag op het tabblad Instellingen."
+
+msgid "Private NAT"
+msgstr ""
+
+msgid ""
+"Private subnet for this network, e.g. 172.30.0.0/24. Must not overlap "
+"another network or an existing host interface."
+msgstr ""
+
+msgid "Resize"
+msgstr "Grootte aanpassen"
+
+msgid "Resize disk"
+msgstr "Schijfgrootte aanpassen"
+
+msgid "Resize disk ..."
+msgstr "Schijfgrootte aanpassen…"
+
+msgid "Resizing disk ..."
+msgstr "Schijfgrootte aanpassen…"
+
+msgid "Restart"
+msgstr "Opnieuw starten"
+
+msgid "Restarted."
+msgstr "Opnieuw gestart."
+
+msgid "Restarting ..."
+msgstr "Opnieuw starten…"
+
+msgid "Restore"
+msgstr "Herstellen"
+
+msgid "Restore backup ..."
+msgstr "Back-up herstellen…"
+
+msgid "Restore onto VM"
+msgstr "Herstellen op VM"
+
+msgid "Restore snapshot ..."
+msgstr "Momentopname herstellen…"
+
+msgid ""
+"Restoring a snapshot stops the VM, permanently overwrites its current disk "
+"with the selected snapshot's saved disk, and boots from the snapshot's saved"
+" memory state if it has one. Any changes made since the snapshot was taken "
+"will be lost. Continue?"
+msgstr ""
+"Bij het herstellen van een momentopname stopt de VM, wordt de huidige schijf"
+" permanent overschreven met de opgeslagen schijf van de geselecteerde "
+"momentopname en start de VM op vanuit de opgeslagen geheugenstatus van de "
+"momentopname als deze er een heeft. Eventuele wijzigingen die zijn "
+"aangebracht sinds de momentopname is gemaakt, gaan verloren. Doorgaan?"
+
+msgid "Restoring backup ..."
+msgstr "Back-up herstellen…"
+
+msgid "Restoring snapshot ..."
+msgstr "Back-up herstellen…"
+
+msgid ""
+"Restoring stops the target VM, permanently overwrites its current disk with "
+"this backup's saved disk, and boots from the backup's saved memory state if "
+"it has one. Any changes made since the backup was taken will be lost. "
+"Continue?"
+msgstr ""
+"Herstellen stopt de doel-VM, overschrijft permanent de huidige schijf met de"
+" opgeslagen schijf van deze back-up en start op vanuit de opgeslagen "
+"geheugenstatus van de back-up als deze er een heeft. Eventuele wijzigingen "
+"die zijn aangebracht sinds de back-up is gemaakt, gaan verloren. Doorgaan?"
+
+msgid "Rootfs URL"
+msgstr "Rootfs-URL"
+
+msgid "Rootfs path"
+msgstr "Rootfs-pad"
+
+msgid "Run"
+msgstr "Uitvoeren"
+
+msgid "Run DHCP for this network"
+msgstr ""
+
+msgid "Schedule"
+msgstr "Planning"
+
+msgid "Select a VM ..."
+msgstr "Selecteer een VM..."
+
+msgid "Select a snapshot ..."
+msgstr "Selecteer een momentopname..."
+
+msgid "Settings"
+msgstr "Instellingen"
+
+msgid "Shared folder"
+msgstr "Gedeelde map"
+
+msgid "Size"
+msgstr "Grootte"
+
+msgid "Snapshot"
+msgstr "Momentopname"
+
+msgid "Snapshot '%s' not found."
+msgstr "Momentopname '%s' niet gevonden."
+
+msgid "Snapshots"
+msgstr "Momentopnames"
+
+msgid "Start"
+msgstr "Starten"
+
+msgid "Started."
+msgstr "Gestart."
+
+msgid "Starting ..."
+msgstr "Starten…"
+
+msgid "State"
+msgstr "Status"
+
+msgid "Stop"
+msgstr "Stoppen"
+
+msgid "Stopped."
+msgstr "Gestopt."
+
+msgid "Stopping ..."
+msgstr "Stoppen…"
+
+msgid "Storage"
+msgstr "Opslag"
+
+msgid "Subnet (CIDR)"
+msgstr ""
+
+msgid "Subnet must be in CIDR notation, e.g. 172.30.0.0/24."
+msgstr ""
+
+msgid "Sync backup list"
+msgstr "Back-uplijst synchroniseren"
+
+msgid "Syncing backup list ..."
+msgstr "Back-uplijst synchroniseren…"
+
+msgid ""
+"The image can only be set when a VM is created. Delete and recreate the VM "
+"to use a different image."
+msgstr ""
+"De image kan alleen worden ingesteld wanneer een VM wordt gemaakt. Verwijder"
+" en maak de VM opnieuw om een andere afbeelding te gebruiken."
+
+msgid ""
+"The target VM's current disk is overwritten with this backup's saved disk. "
+"Defaults to the VM the backup was taken from."
+msgstr ""
+"De huidige schijf van de doel-VM wordt overschreven met de opgeslagen schijf"
+" van deze back-up. Standaardwaarden voor de VM waarvan de back-up is "
+"genomen."
+
+msgid ""
+"This reconciles the backup list against what actually exists on disk, "
+"removing entries whose backup directory is gone. A copy of the list file is "
+"kept as omv-microvm-backup.list.bak. Continue?"
+msgstr ""
+"Hierdoor wordt de back-uplijst afgestemd op wat er feitelijk op schijf "
+"bestaat, waardoor vermeldingen worden verwijderd waarvan de back-upmap "
+"verdwenen is. Een kopie van het lijstbestand wordt bewaard als omv-microvm-"
+"backup.list.bak. Doorgaan?"
+
+msgid "Type"
+msgstr ""
+
+msgid "UUID"
+msgstr "UUID"
+
+msgid "VM"
+msgstr "VM"
+
+msgid "VM '%s' has never been started; there is no disk to resize yet."
+msgstr ""
+"VM ‘%s’ is nooit gestart; er is nog geen schijf om in grootte aan te passen."
+
+msgid "VM '%s' has never been started; there is nothing to snapshot yet."
+msgstr ""
+"VM ‘%s’ is nooit gestart; er is nog niets om een momentopname van te maken."
+
+msgid "VM '%s' is %s; it must be stopped before its disk can be resized."
+msgstr ""
+"VM '%s' is %s; het moet worden gestopt voordat de grootte van de schijf kan "
+"worden gewijzigd."
+
+msgid "VM '%s' is %s; must be running or stopped to take a snapshot."
+msgstr ""
+"VM '%s' is %s; moet worden uitgevoerd of gestopt om een momentopname te "
+"maken."
+
+msgid "VM '%s' not found."
+msgstr "VM '%s' niet gevonden."
+
+msgid "VM Name"
+msgstr "VM-naam"
+
+msgid "VM name"
+msgstr "VM-naam"
+
+msgid "VMs"
+msgstr "VM's"
+
+msgid ""
+"VMs on the same private NAT network can reach each other; VMs on a host "
+"bridge network are visible on the LAN."
+msgstr ""
+
+msgid "Version"
+msgstr "Versie"
+
+msgid "Warm"
+msgstr "Warm"
+
+msgid ""
+"Where per-VM working directories (writable rootfs copies) and downloaded "
+"images are stored."
+msgstr ""
+"Waar per-VM werkmappen (schrijfbare rootfs-kopieën) en gedownloade images "
+"worden opgeslagen."
+
+msgid "aarch64"
+msgstr "aarch64"
+
+msgid "systemd unit status"
+msgstr "systemd unit status"
+
+msgid "vCPUs"
+msgstr "vCPU's"
+
+msgid "x86_64"
+msgstr "x86_64"
