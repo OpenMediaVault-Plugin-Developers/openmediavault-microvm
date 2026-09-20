@@ -50,8 +50,8 @@ data:
         prop: snapshot_count
         flexGrow: 1
         sortable: true
-      - name: _("Bridge")
-        prop: bridge
+      - name: _("Network")
+        prop: networkref
         flexGrow: 1
         sortable: true
         hidden: true

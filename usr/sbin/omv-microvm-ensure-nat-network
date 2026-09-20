@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-ensure-nat-network — idempotently create (or verify) the
+# bridge, forwarding and NAT rules for a "nat"-type microvm network, then
+# print the bridge device name on stdout.
+#
+# Called by omv-microvm-run on every VM start; never tears anything down
+# (see omv-microvm-teardown-nat-network for that), so it's safe to call
+# repeatedly across many VMs sharing the same network.
+#
+# Usage: omv-microvm-ensure-nat-network <network-name> <subnet-cidr>
+
+set -euo pipefail
+
+NETNAME="${1:?usage: omv-microvm-ensure-nat-network <network-name> <subnet-cidr>}"
+SUBNET="${2:?usage: omv-microvm-ensure-nat-network <network-name> <subnet-cidr>}"
+
+# Deterministic short name (IFNAMSIZ=15), same derivation used by
+# omv-microvm-teardown-nat-network.
+BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-8)"
+
+NET_ADDR="${SUBNET%/*}"
+PREFIX="${SUBNET#*/}"
+
+_ip_to_int() {
+    local a b c d
+    IFS=. read -r a b c d <<< "$1"
+    echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
+}
+_int_to_ip() {
+    local n=$1
+    echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"
+}
+
+NET_INT=$(_ip_to_int "$NET_ADDR")
+HOST_BITS=$((32 - PREFIX))
+if [ "$HOST_BITS" -lt 2 ]; then
+    echo "Subnet ${SUBNET} is too small (need at least a /30)." >&2
+    exit 1
+fi
+GATEWAY_IP=$(_int_to_ip "$((NET_INT + 1))")
+
+if ! ip link show "$BRIDGE" >/dev/null 2>&1; then
+    ip link add name "$BRIDGE" type bridge
+fi
+ip link set "$BRIDGE" up
+if ! ip -4 addr show dev "$BRIDGE" | grep -q " ${GATEWAY_IP}/"; then
+    ip addr add "${GATEWAY_IP}/${PREFIX}" dev "$BRIDGE" 2>/dev/null || true
+fi
+
+sysctl -qw net.ipv4.ip_forward=1
+
+# Rules live in their own table so this plugin can manage them independently
+# of any other firewall configuration on the host.
+nft list table ip mvm_nat >/dev/null 2>&1 || nft add table ip mvm_nat
+nft list chain ip mvm_nat postrouting >/dev/null 2>&1 \
+    || nft add chain ip mvm_nat postrouting '{ type nat hook postrouting priority 100 ; }'
+nft list chain ip mvm_nat forward >/dev/null 2>&1 \
+    || nft add chain ip mvm_nat forward '{ type filter hook forward priority 0 ; }'
+
+RULE_TAG="mvm-net:${NETNAME}"
+if ! nft list chain ip mvm_nat postrouting 2>/dev/null | grep -qF "\"${RULE_TAG}\""; then
+    nft add rule ip mvm_nat postrouting ip saddr "$SUBNET" masquerade comment "\"${RULE_TAG}\""
+fi
+if ! nft list chain ip mvm_nat forward 2>/dev/null | grep -qF "\"${RULE_TAG}\""; then
+    nft add rule ip mvm_nat forward iifname "$BRIDGE" accept comment "\"${RULE_TAG}\""
+    nft add rule ip mvm_nat forward oifname "$BRIDGE" ct state established,related accept comment "\"${RULE_TAG}\""
+fi
+
+echo "$BRIDGE"

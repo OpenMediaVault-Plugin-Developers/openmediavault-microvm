@@ -40,7 +40,7 @@
       "type": "string",
       "default": ""
     },
-    "bridge": {
+    "networkref": {
       "type": "string",
       "default": ""
     },

@@ -1,0 +1,41 @@
+{
+  "type": "config",
+  "id": "conf.service.microvm.network",
+  "title": "microvm network",
+  "queryinfo": {
+    "xpath": "//services/microvm/networks/network",
+    "iterable": true,
+    "idproperty": "uuid"
+  },
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "format": "uuidv4"
+    },
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "type": {
+      "type": "string",
+      "enum": ["bridge", "nat"],
+      "default": "bridge"
+    },
+    "bridge": {
+      "type": "string",
+      "default": ""
+    },
+    "subnet": {
+      "type": "string",
+      "default": ""
+    },
+    "dhcp": {
+      "type": "boolean",
+      "default": true
+    },
+    "notes": {
+      "type": "string",
+      "default": ""
+    }
+  }
+}

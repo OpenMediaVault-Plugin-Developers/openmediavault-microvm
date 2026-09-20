@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-teardown-nat-network — remove the bridge and NAT/forwarding
+# rules created by omv-microvm-ensure-nat-network for a network that is
+# being deleted.
+#
+# Invoked by deleteNetwork() in the MicroVm RPC service. Not called on
+# ordinary VM stop — like a real host bridge, a NAT network persists across
+# individual VM starts/stops and is only torn down when the network itself
+# is deleted.
+#
+# Usage: omv-microvm-teardown-nat-network <network-name>
+
+set -uo pipefail
+
+NETNAME="${1:?usage: omv-microvm-teardown-nat-network <network-name>}"
+BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-8)"
+RULE_TAG="mvm-net:${NETNAME}"
+
+for chain in postrouting forward; do
+    handles=$(nft -a list chain ip mvm_nat "$chain" 2>/dev/null \
+        | grep -F "\"${RULE_TAG}\"" \
+        | grep -oE 'handle [0-9]+' \
+        | awk '{print $2}')
+    for handle in $handles; do
+        nft delete rule ip mvm_nat "$chain" handle "$handle" 2>/dev/null || true
+    done
+done
+
+if ip link show "$BRIDGE" >/dev/null 2>&1; then
+    ip link del "$BRIDGE" 2>/dev/null || true
+fi
+
+exit 0

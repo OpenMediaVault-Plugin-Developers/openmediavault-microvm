@@ -1,0 +1,98 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-network-form-page
+  type: formPage
+  config:
+    request:
+      service: MicroVm
+      get:
+        method: getNetwork
+        params:
+          uuid: "{{ _routeParams.uuid }}"
+      post:
+        method: setNetwork
+    fields:
+      - type: confObjUuid
+      - type: textInput
+        name: name
+        label: _("Name")
+        value: ""
+        validators:
+          required: true
+          patternType: shareName
+      - type: select
+        name: type
+        label: _("Type")
+        value: "bridge"
+        store:
+          data:
+            - ["bridge", _("Host bridge")]
+            - ["nat", _("Private NAT")]
+        hint: _("Host bridge attaches VMs on this network directly to an existing bridge device, giving them LAN visibility. Private NAT creates an isolated internal network with outbound internet access via NAT; VMs on it aren't directly reachable from the LAN.")
+      - type: select
+        name: bridge
+        label: _("Bridge")
+        textField: bridge
+        valueField: bridge
+        value: ""
+        store:
+          proxy:
+            service: MicroVm
+            get:
+              method: enumerateBridges
+        modifiers:
+          - type: disabled
+            constraint:
+              operator: ne
+              arg0:
+                prop: type
+              arg1: bridge
+        validators:
+          requiredIf:
+            operator: eq
+            arg0:
+              prop: type
+            arg1: bridge
+      - type: textInput
+        name: subnet
+        label: _("Subnet (CIDR)")
+        value: "172.30.0.0/24"
+        hint: _("Private subnet for this network, e.g. 172.30.0.0/24. Must not overlap another network or an existing host interface.")
+        modifiers:
+          - type: disabled
+            constraint:
+              operator: ne
+              arg0:
+                prop: type
+              arg1: nat
+        validators:
+          requiredIf:
+            operator: eq
+            arg0:
+              prop: type
+            arg1: nat
+      - type: checkbox
+        name: dhcp
+        label: _("Run DHCP for this network")
+        value: true
+        modifiers:
+          - type: disabled
+            constraint:
+              operator: ne
+              arg0:
+                prop: type
+              arg1: nat
+      - type: textInput
+        name: notes
+        label: _("Notes")
+        value: ""
+    buttons:
+      - template: submit
+        execute:
+          type: url
+          url: /services/microvm/network
+      - template: cancel
+        execute:
+          type: url
+          url: /services/microvm/network

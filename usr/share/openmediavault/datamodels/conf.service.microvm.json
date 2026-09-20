@@ -25,10 +25,6 @@
       ],
       "default": ""
     },
-    "default_bridge": {
-      "type": "string",
-      "default": ""
-    },
     "install_cterm": {
       "type": "boolean",
       "default": true
@@ -73,7 +69,7 @@
                 "type": "string",
                 "default": ""
               },
-              "bridge": {
+              "networkref": {
                 "type": "string",
                 "default": ""
               },
@@ -135,6 +131,48 @@
                 "default": 0
               },
               "imported": {
+                "type": "string",
+                "default": ""
+              }
+            }
+          }
+        }
+      }
+    },
+    "networks": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uuid": {
+                "type": "string",
+                "format": "uuidv4"
+              },
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "type": {
+                "type": "string",
+                "enum": ["bridge", "nat"],
+                "default": "bridge"
+              },
+              "bridge": {
+                "type": "string",
+                "default": ""
+              },
+              "subnet": {
+                "type": "string",
+                "default": ""
+              },
+              "dhcp": {
+                "type": "boolean",
+                "default": true
+              },
+              "notes": {
                 "type": "string",
                 "default": ""
               }

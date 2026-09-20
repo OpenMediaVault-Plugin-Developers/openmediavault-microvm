@@ -1,0 +1,52 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-network-datatable-page
+  type: datatablePage
+  config:
+    autoReload: false
+    hasSearchField: true
+    stateId: 8f1a2b3c-4d5e-4f6a-9b7c-1d2e3f4a5b6c
+    rowId: uuid
+    sorters:
+      - dir: asc
+        prop: name
+    store:
+      proxy:
+        service: MicroVm
+        get:
+          method: getNetworkList
+    columns:
+      - name: _("Name")
+        prop: name
+        flexGrow: 1
+        sortable: true
+      - name: _("Type")
+        prop: type
+        flexGrow: 1
+        sortable: true
+      - name: _("Details")
+        prop: details
+        flexGrow: 2
+        sortable: true
+      - name: _("Notes")
+        prop: notes
+        flexGrow: 2
+        sortable: false
+    actions:
+      - template: create
+        execute:
+          type: url
+          url: "/services/microvm/network/create"
+      - template: edit
+        execute:
+          type: url
+          url: "/services/microvm/network/edit/{{ _selected[0].uuid }}"
+      - template: delete
+        execute:
+          type: request
+          request:
+            service: MicroVm
+            method: deleteNetwork
+            params:
+              uuid: "{{ _selected[0].uuid }}"

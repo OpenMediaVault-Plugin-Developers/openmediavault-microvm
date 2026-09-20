@@ -5,7 +5,9 @@
 #
 # Usage: omv-microvm-run <vm-name>
 
-set -euo pipefail
+set -eu
+
+. /usr/share/openmediavault/scripts/helper-functions
 
 VMNAME="${1:?usage: omv-microvm-run <vm-name>}"
 
@@ -30,34 +32,31 @@ die() {
     exit 2
 }
 
-VM_JSON=$(omv-confdbadm read "conf.service.microvm.vm" 2>/dev/null \
-    | jq -c --arg name "$VMNAME" '.[] | select(.name == $name)')
-[ -n "$VM_JSON" ] || die "VM '${VMNAME}' not found in configuration."
+VM_XPATH="/config/services/microvm/vms/vm[name='${VMNAME}']"
+omv_config_exists "$VM_XPATH" || die "VM '${VMNAME}' not found in configuration."
+ENABLE=$(omv_config_get "${VM_XPATH}/enable")
+omv_checkyesno "$ENABLE" || die "VM '${VMNAME}' is disabled."
 
-ENABLE=$(echo "$VM_JSON" | jq -r '.enable')
-[ "$ENABLE" = "true" ] || die "VM '${VMNAME}' is disabled."
+VCPUS=$(omv_config_get "${VM_XPATH}/vcpus")
+MEMORY_MIB=$(omv_config_get "${VM_XPATH}/memory_mib")
+IMAGE_REF=$(omv_config_get "${VM_XPATH}/imageref")
+NETWORKREF=$(omv_config_get "${VM_XPATH}/networkref")
+MACADDR=$(omv_config_get "${VM_XPATH}/macaddr")
+BOOTARGS=$(omv_config_get "${VM_XPATH}/bootargs")
 
-VCPUS=$(echo "$VM_JSON" | jq -r '.vcpus')
-MEMORY_MIB=$(echo "$VM_JSON" | jq -r '.memory_mib')
-IMAGE_REF=$(echo "$VM_JSON" | jq -r '.imageref')
-BRIDGE=$(echo "$VM_JSON" | jq -r '.bridge')
-MACADDR=$(echo "$VM_JSON" | jq -r '.macaddr // ""')
-BOOTARGS=$(echo "$VM_JSON" | jq -r '.bootargs')
+[ -n "$IMAGE_REF" ] || die "No image configured."
+[ -n "$NETWORKREF" ] || die "No network configured."
 
-if [ -z "$IMAGE_REF" ] || [ "$IMAGE_REF" = "null" ]; then
-    die "No image configured."
-fi
-if [ -z "$BRIDGE" ] || [ "$BRIDGE" = "null" ]; then
-    die "No bridge configured."
-fi
+NETWORK_XPATH="/config/services/microvm/networks/network[name='${NETWORKREF}']"
+omv_config_exists "$NETWORK_XPATH" || die "Network '${NETWORKREF}' not found in configuration."
+NET_TYPE=$(omv_config_get "${NETWORK_XPATH}/type")
 
-SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
-SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
-[ -n "$SF_UUID" ] || die "No shared folder configured for VM storage."
-SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" | jq -r '.')
+SF_UUID=$(omv_config_get "/config/services/microvm/sharedfolderref")
+omv_isuuid "$SF_UUID" || die "No shared folder configured for VM storage."
+SF_PATH=$(omv_get_sharedfolder_path "$SF_UUID")
 [ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
 
-VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+VM_DIR="${SF_PATH}/vms/${VMNAME}"
 mkdir -p "$VM_DIR"
 
 # Dropped by omv-microvm-snapshot-restore before starting the unit. Skips
@@ -77,16 +76,13 @@ KERNEL_PATH="${VM_DIR}/vmlinux"
 
 if [ "$RESTORE_MODE" -eq 0 ]; then
     if [ ! -f "$ROOTFS_PATH" ] || [ ! -f "$KERNEL_PATH" ]; then
-        IMAGE_JSON=$(omv-confdbadm read "conf.service.microvm.image" 2>/dev/null \
-            | jq -c --arg ref "$IMAGE_REF" '
-                .[] | select(
-                    (if (.version // "") == "" then (.name + "-" + .arch)
-                     else (.name + "-" + .arch + "-" + .version) end) == $ref
-                )')
-        [ -n "$IMAGE_JSON" ] || die "Image '${IMAGE_REF}' not found."
+        # Composite key: "name-arch", or "name-arch-version" when a
+        # version is set — must match imageRef() in the RPC service.
+        IMAGE_XPATH="/config/services/microvm/images/image[(version='' and concat(name,'-',arch)='${IMAGE_REF}') or (version!='' and concat(name,'-',arch,'-',version)='${IMAGE_REF}')]"
+        omv_config_exists "$IMAGE_XPATH" || die "Image '${IMAGE_REF}' not found."
 
-        BASE_KERNEL_PATH=$(echo "$IMAGE_JSON" | jq -r '.kernel_path')
-        BASE_ROOTFS_PATH=$(echo "$IMAGE_JSON" | jq -r '.rootfs_path')
+        BASE_KERNEL_PATH=$(omv_config_get "${IMAGE_XPATH}/kernel_path")
+        BASE_ROOTFS_PATH=$(omv_config_get "${IMAGE_XPATH}/rootfs_path")
     fi
 
     if [ ! -f "$ROOTFS_PATH" ]; then
@@ -119,6 +115,37 @@ rm -f "$SOCKET_PATH"
 # find and remove the same device.
 TAP_NAME="mvm-$(echo -n "$VMNAME" | md5sum | cut -c1-10)"
 
+if [ "$NET_TYPE" = "nat" ]; then
+    SUBNET=$(omv_config_get "${NETWORK_XPATH}/subnet")
+    BRIDGE=$(omv-microvm-ensure-nat-network "$NETWORKREF" "$SUBNET")
+
+    # Firecracker guests get no DHCP server on a private NAT network, so
+    # each VM's address is handed to the kernel directly via the "ip="
+    # boot parameter (standard Linux IP autoconfiguration — no in-guest
+    # DHCP client required). The offset is a deterministic hash of the VM
+    # name, the same approach used for TAP_NAME above.
+    NET_ADDR="${SUBNET%/*}"
+    PREFIX="${SUBNET#*/}"
+    _ip_to_int() { local a b c d; IFS=. read -r a b c d <<< "$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
+    _int_to_ip() { local n=$1; echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"; }
+    NET_INT=$(_ip_to_int "$NET_ADDR")
+    HOST_BITS=$((32 - PREFIX))
+    [ "$HOST_BITS" -ge 2 ] || die "Subnet '${SUBNET}' is too small (need at least a /30)."
+    MASK_INT=$(( (0xFFFFFFFF << HOST_BITS) & 0xFFFFFFFF ))
+    NETMASK=$(_int_to_ip "$MASK_INT")
+    GATEWAY_IP=$(_int_to_ip "$((NET_INT + 1))")
+    USABLE_HOSTS=$(( (1 << HOST_BITS) - 3 ))
+    HASH=$(echo -n "$VMNAME" | cksum | cut -d' ' -f1)
+    OFFSET=$(( (HASH % USABLE_HOSTS) + 2 ))
+    GUEST_IP=$(_int_to_ip "$((NET_INT + OFFSET))")
+
+    BOOTARGS="${BOOTARGS} ip=${GUEST_IP}::${GATEWAY_IP}:${NETMASK}::eth0:off"
+    _log "Private NAT network '${NETWORKREF}': guest ${GUEST_IP}, gateway ${GATEWAY_IP}, bridge ${BRIDGE}."
+else
+    BRIDGE=$(omv_config_get "${NETWORK_XPATH}/bridge")
+    [ -n "$BRIDGE" ] || die "Network '${NETWORKREF}' has no bridge device configured."
+fi
+
 if ! ip link show "$TAP_NAME" >/dev/null 2>&1; then
     ip tuntap add dev "$TAP_NAME" mode tap
 fi
@@ -126,7 +153,7 @@ ip link set "$TAP_NAME" master "$BRIDGE"
 ip link set "$TAP_NAME" up
 
 NETIF_JSON="{\"iface_id\":\"eth0\",\"host_dev_name\":\"${TAP_NAME}\"}"
-if [ -n "$MACADDR" ] && [ "$MACADDR" != "null" ]; then
+if [ -n "$MACADDR" ]; then
     NETIF_JSON="{\"iface_id\":\"eth0\",\"host_dev_name\":\"${TAP_NAME}\",\"guest_mac\":\"${MACADDR}\"}"
 fi
 

@@ -6,7 +6,9 @@
 #
 # Usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>
 
-set -euo pipefail
+set -eu
+
+. /usr/share/openmediavault/scripts/helper-functions
 
 VMNAME="${1:?usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>}"
 SNAPSHOT_DIR="${2:?usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>}"
@@ -23,12 +25,11 @@ die() {
 [ -f "${SNAPSHOT_DIR}/rootfs.ext4" ] || die "Snapshot is incomplete: missing ${SNAPSHOT_DIR}/rootfs.ext4"
 
 # Must match the derivation in omv-microvm-run.
-SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
-SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
-[ -n "$SF_UUID" ] || die "No shared folder configured for VM storage."
-SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" | jq -r '.')
+SF_UUID=$(omv_config_get "/config/services/microvm/sharedfolderref")
+omv_isuuid "$SF_UUID" || die "No shared folder configured for VM storage."
+SF_PATH=$(omv_get_sharedfolder_path "$SF_UUID")
 [ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
-VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+VM_DIR="${SF_PATH}/vms/${VMNAME}"
 mkdir -p "$VM_DIR"
 
 _log "Overwriting current disk with snapshot's saved disk ..."

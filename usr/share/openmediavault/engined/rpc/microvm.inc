@@ -32,6 +32,11 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
 
         $this->registerMethod('enumerateBridges');
 
+        $this->registerMethod('getNetworkList');
+        $this->registerMethod('getNetwork');
+        $this->registerMethod('setNetwork');
+        $this->registerMethod('deleteNetwork');
+
         $this->registerMethod('getVmList');
         $this->registerMethod('getVm');
         $this->registerMethod('getVmNameStateList');
@@ -59,6 +64,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('doBackup');
         $this->registerMethod('restoreBackup');
         $this->registerMethod('deleteBackup');
+        $this->registerMethod('syncBackupList');
 
         $this->registerMethod('getJobList');
         $this->registerMethod('getJob');
@@ -279,6 +285,92 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         return $objects;
     }
 
+    public function getNetworkList($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.getlist");
+        $db = \OMV\Config\Database::getInstance();
+        $objects = [];
+        foreach ($db->getAssoc("conf.service.microvm.network") as $object) {
+            $object['details'] = $this->networkDetails($object);
+            $objects[] = $object;
+        }
+        return $this->applyFilter($objects, $params['start'], $params['limit'],
+            $params['sortfield'], $params['sortdir']);
+    }
+
+    private function networkDetails($network)
+    {
+        if ('nat' === $network['type']) {
+            $details = $network['subnet'];
+            if ($network['dhcp']) {
+                $details .= sprintf(' (%s)', gettext("DHCP"));
+            }
+            return $details;
+        }
+        return $network['bridge'];
+    }
+
+    public function getNetwork($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.objectuuid");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.network", $params['uuid']);
+        return $object->getAssoc();
+    }
+
+    public function setNetwork($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.setnetwork");
+        if ('bridge' === $params['type'] && empty($params['bridge'])) {
+            throw new \OMV\Exception(gettext("A bridge device must be selected for a host bridge network."));
+        }
+        if ('nat' === $params['type']) {
+            if (empty($params['subnet'])) {
+                throw new \OMV\Exception(gettext("A subnet is required for a private NAT network."));
+            }
+            if (!preg_match('#^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$#', $params['subnet'])) {
+                throw new \OMV\Exception(gettext("Subnet must be in CIDR notation, e.g. 172.30.0.0/24."));
+            }
+        }
+        $db = \OMV\Config\Database::getInstance();
+        $object = new \OMV\Config\ConfigObject("conf.service.microvm.network");
+        $object->setAssoc($params);
+        if (TRUE === $object->isNew()) {
+            $db->assertIsUnique($object, "name");
+        }
+        $db->set($object);
+        $this->applyChanges($context);
+        return $object->getAssoc();
+    }
+
+    public function deleteNetwork($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.objectuuid");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.network", $params['uuid']);
+        $name = $object->get('name');
+        foreach ($db->get("conf.service.microvm.vm") as $vm) {
+            if ($vm->get('networkref') === $name) {
+                throw new \OMV\Exception(sprintf(
+                    gettext("Network '%s' is still used by VM '%s'. Change that VM's network first."),
+                    $name, $vm->get('name')
+                ));
+            }
+        }
+        if ('nat' === $object->get('type')) {
+            $cmd = new \OMV\System\Process('omv-microvm-teardown-nat-network', [$name]);
+            $cmd->setQuiet(true);
+            $cmd->execute();
+        }
+        $db->delete($object);
+        $this->applyChanges($context);
+        return $object->getAssoc();
+    }
+
     public function getVmList($params, $context)
     {
         $this->validateMethodContext($context, ["role" => OMV_ROLE_ADMINISTRATOR]);
@@ -389,6 +481,18 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $db = \OMV\Config\Database::getInstance();
         $object = new \OMV\Config\ConfigObject("conf.service.microvm.vm");
         $object->setAssoc($params);
+        $networkExists = FALSE;
+        foreach ($db->get("conf.service.microvm.network") as $network) {
+            if ($network->get('name') === $object->get('networkref')) {
+                $networkExists = TRUE;
+                break;
+            }
+        }
+        if (FALSE === $networkExists) {
+            throw new \OMV\Exception(sprintf(
+                gettext("Network '%s' does not exist."), $object->get('networkref')
+            ));
+        }
         $isNew = $object->isNew();
         if (TRUE === $isNew) {
             $db->assertIsUnique($object, "name");
@@ -963,6 +1067,20 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                 sprintf('/^%s,/d', $params['uuid']), $listFile]);
             $cmd->execute();
         }
+    }
+
+    public function syncBackupList($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename) {
+            $cmd = new \OMV\System\Process('omv-microvm-sync-backups-list');
+            $cmd->setRedirect2to1();
+            $cmdLine = $cmd->getCommandLine();
+            if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                throw new \OMV\ExecException($cmdLine, $output);
+            }
+            return $output;
+        });
     }
 
     public function getJobList($params, $context)

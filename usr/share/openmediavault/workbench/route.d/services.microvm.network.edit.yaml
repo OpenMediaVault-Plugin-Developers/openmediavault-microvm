@@ -1,0 +1,8 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/network/edit/:uuid"
+  title: _("Edit")
+  editing: true
+  notificationTitle: _("Edit network.")
+  component: omv-services-microvm-network-form-page

@@ -23,20 +23,6 @@ data:
         hasEmptyOption: true
         hint: _("Where per-VM working directories (writable rootfs copies) and downloaded images are stored.")
       - type: divider
-        title: _("Networking")
-      - type: select
-        name: default_bridge
-        label: _("Default bridge")
-        hasEmptyOption: true
-        textField: bridge
-        valueField: bridge
-        store:
-          proxy:
-            service: MicroVm
-            get:
-              method: enumerateBridges
-        hint: _("Pre-selected bridge when creating a new VM.")
-      - type: divider
         title: _("Console")
       - type: checkbox
         name: install_cterm

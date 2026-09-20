@@ -1,0 +1,7 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/network/create"
+  title: _("Create")
+  notificationTitle: _("Created network.")
+  component: omv-services-microvm-network-form-page

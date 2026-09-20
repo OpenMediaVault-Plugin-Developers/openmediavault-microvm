@@ -10,7 +10,9 @@
 #
 # Usage: omv-microvm-snapshot-restore-hook <vm-name>
 
-set -euo pipefail
+set -eu
+
+. /usr/share/openmediavault/scripts/helper-functions
 
 VMNAME="${1:?usage: omv-microvm-snapshot-restore-hook <vm-name>}"
 
@@ -24,12 +26,11 @@ die() {
 }
 
 # Must match the derivation in omv-microvm-run.
-SETTINGS_JSON=$(omv-confdbadm read "conf.service.microvm" 2>/dev/null)
-SF_UUID=$(echo "$SETTINGS_JSON" | jq -r '.sharedfolderref // ""')
-[ -n "$SF_UUID" ] || exit 0
-SF_PATH=$(omv-rpc -u admin ShareMgmt getPath "{\"uuid\":\"${SF_UUID}\"}" 2>/dev/null | jq -r '.' || echo "")
+SF_UUID=$(omv_config_get "/config/services/microvm/sharedfolderref")
+omv_isuuid "$SF_UUID" || exit 0
+SF_PATH=$(omv_get_sharedfolder_path "$SF_UUID")
 [ -n "$SF_PATH" ] || exit 0
-VM_DIR="${SF_PATH%/}/vms/${VMNAME}"
+VM_DIR="${SF_PATH}/vms/${VMNAME}"
 MARKER="${VM_DIR}/.restore_from"
 
 [ -f "$MARKER" ] || exit 0

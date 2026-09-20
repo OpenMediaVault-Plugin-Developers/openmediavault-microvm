@@ -22,9 +22,6 @@
             }
           ]
         },
-        "default_bridge": {
-          "type": "string"
-        },
         "install_cterm": {
           "type": "boolean",
           "required": true
@@ -81,7 +78,7 @@
           "type": "string",
           "required": true
         },
-        "bridge": {
+        "networkref": {
           "type": "string",
           "required": true
         },
@@ -407,6 +404,42 @@
           "type": "boolean"
         },
         "dayofweek": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "type": "rpc",
+    "id": "rpc.microvm.setnetwork",
+    "params": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "format": "uuidv4",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$",
+          "required": true
+        },
+        "type": {
+          "type": "string",
+          "enum": ["bridge", "nat"],
+          "required": true
+        },
+        "bridge": {
+          "type": "string"
+        },
+        "subnet": {
+          "type": "string"
+        },
+        "dhcp": {
+          "type": "boolean"
+        },
+        "notes": {
           "type": "string"
         }
       }

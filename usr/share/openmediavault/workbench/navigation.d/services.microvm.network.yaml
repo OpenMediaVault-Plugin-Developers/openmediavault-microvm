@@ -1,0 +1,8 @@
+version: "1.0"
+type: navigation-item
+data:
+  path: "services.microvm.network"
+  text: _("Networks")
+  position: 15
+  icon: mdi:lan
+  url: "/services/microvm/network"

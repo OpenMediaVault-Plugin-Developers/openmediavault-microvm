@@ -1,0 +1,6 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/network"
+  title: _("Networks")
+  component: omv-services-microvm-network-datatable-page

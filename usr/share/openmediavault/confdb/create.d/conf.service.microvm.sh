@@ -26,10 +26,10 @@ if ! omv_config_exists "/config/services/microvm"; then
     omv_config_add_node "/config/services" "microvm"
     omv_config_add_key "/config/services/microvm" "enable" "1"
     omv_config_add_key "/config/services/microvm" "sharedfolderref" ""
-    omv_config_add_key "/config/services/microvm" "default_bridge" ""
     omv_config_add_key "/config/services/microvm" "install_cterm" "1"
     omv_config_add_node "/config/services/microvm" "vms"
     omv_config_add_node "/config/services/microvm" "images"
+    omv_config_add_node "/config/services/microvm" "networks"
     omv_config_add_node "/config/services/microvm" "jobs"
 fi
 
@@ -40,9 +40,6 @@ fi
 if ! omv_config_exists "/config/services/microvm/sharedfolderref"; then
     omv_config_add_key "/config/services/microvm" "sharedfolderref" ""
 fi
-if ! omv_config_exists "/config/services/microvm/default_bridge"; then
-    omv_config_add_key "/config/services/microvm" "default_bridge" ""
-fi
 if ! omv_config_exists "/config/services/microvm/install_cterm"; then
     omv_config_add_key "/config/services/microvm" "install_cterm" "1"
 fi
@@ -51,6 +48,9 @@ if ! omv_config_exists "/config/services/microvm/vms"; then
 fi
 if ! omv_config_exists "/config/services/microvm/images"; then
     omv_config_add_node "/config/services/microvm" "images"
+fi
+if ! omv_config_exists "/config/services/microvm/networks"; then
+    omv_config_add_node "/config/services/microvm" "networks"
 fi
 if ! omv_config_exists "/config/services/microvm/jobs"; then
     omv_config_add_node "/config/services/microvm" "jobs"

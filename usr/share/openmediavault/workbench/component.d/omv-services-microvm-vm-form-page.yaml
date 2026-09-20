@@ -53,16 +53,22 @@ data:
                 prop: uuid
               arg1: fa4b1c66-ef79-11e5-87a0-0002b3a176b4
       - type: select
-        name: bridge
-        label: _("Bridge")
-        textField: bridge
-        valueField: bridge
+        name: networkref
+        label: _("Network")
+        textField: name
+        valueField: name
         value: ""
         store:
           proxy:
             service: MicroVm
             get:
-              method: enumerateBridges
+              method: getNetworkList
+              params:
+                start: 0
+                limit: -1
+                sortfield: name
+                sortdir: ASC
+        hint: _("VMs on the same private NAT network can reach each other; VMs on a host bridge network are visible on the LAN.")
         validators:
           required: true
       - type: container
