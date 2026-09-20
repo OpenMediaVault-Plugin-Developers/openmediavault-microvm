@@ -14,7 +14,7 @@
 set -uo pipefail
 
 NETNAME="${1:?usage: omv-microvm-teardown-nat-network <network-name>}"
-BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-8)"
+BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-7)"
 RULE_TAG="mvm-net:${NETNAME}"
 
 for chain in postrouting forward; do

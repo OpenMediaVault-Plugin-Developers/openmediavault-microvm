@@ -18,6 +18,8 @@ data:
         name: name
         label: _("Name")
         value: ""
+        hint: _("Fixed once the network is created.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
         validators:
           required: true
           patternType: shareName

@@ -340,6 +340,14 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $object->setAssoc($params);
         if (TRUE === $object->isNew()) {
             $db->assertIsUnique($object, "name");
+        } else {
+            // Enforce server-side too, against direct RPC/API use.
+            $existing = $db->get("conf.service.microvm.network", $object->get('uuid'));
+            if ($existing->get('name') !== $object->get('name')) {
+                throw new \OMV\Exception(gettext(
+                    "The name can only be set when a network is created. Delete and recreate the network to use a different name."
+                ));
+            }
         }
         $db->set($object);
         $this->applyChanges($context);
@@ -502,6 +510,11 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             if ($existing->get('imageref') !== $object->get('imageref')) {
                 throw new \OMV\Exception(gettext(
                     "The image can only be set when a VM is created. Delete and recreate the VM to use a different image."
+                ));
+            }
+            if ($existing->get('name') !== $object->get('name')) {
+                throw new \OMV\Exception(gettext(
+                    "The name can only be set when a VM is created. Delete and recreate the VM to use a different name."
                 ));
             }
         }

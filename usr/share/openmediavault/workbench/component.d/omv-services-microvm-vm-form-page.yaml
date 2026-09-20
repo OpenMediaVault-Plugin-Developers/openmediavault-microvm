@@ -20,7 +20,8 @@ data:
         name: name
         label: _("Name")
         value: ""
-        hint: _("Also used as the systemd instance name and to derive the TAP device name.")
+        hint: _("Also used as the systemd instance name and to derive the TAP device name. Fixed once the VM is created.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
         validators:
           required: true
           patternType: shareName
@@ -43,15 +44,9 @@ data:
             service: MicroVm
             get:
               method: enumerateImages
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
         validators:
           required: true
-        modifiers:
-          - type: disabled
-            constraint:
-              operator: ne
-              arg0:
-                prop: uuid
-              arg1: fa4b1c66-ef79-11e5-87a0-0002b3a176b4
       - type: select
         name: networkref
         label: _("Network")

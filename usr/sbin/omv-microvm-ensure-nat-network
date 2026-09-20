@@ -15,9 +15,10 @@ set -euo pipefail
 NETNAME="${1:?usage: omv-microvm-ensure-nat-network <network-name> <subnet-cidr>}"
 SUBNET="${2:?usage: omv-microvm-ensure-nat-network <network-name> <subnet-cidr>}"
 
-# Deterministic short name (IFNAMSIZ=15), same derivation used by
+# Deterministic short name (IFNAMSIZ=15 — "mvm-nat-" is 8 chars, leaving
+# room for only 7 hash chars), same derivation used by
 # omv-microvm-teardown-nat-network.
-BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-8)"
+BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-7)"
 
 NET_ADDR="${SUBNET%/*}"
 PREFIX="${SUBNET#*/}"
