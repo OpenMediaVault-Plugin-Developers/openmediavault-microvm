@@ -136,8 +136,8 @@ if ! omv-microvm-snapshot-create "${backupVm}" "${vmBackupDir}"; then
 fi
 
 size=0
-for f in memfile vmstate rootfs.ext4; do
-  fsize=$(stat -c%s "${vmBackupDir}/${f}" 2>/dev/null || echo 0)
+for f in "${vmBackupDir}"/memfile "${vmBackupDir}"/vmstate "${vmBackupDir}"/rootfs.ext4 "${vmBackupDir}"/disk-*.img; do
+  fsize=$(stat -c%s "${f}" 2>/dev/null || echo 0)
   size=$((size + fsize))
 done
 

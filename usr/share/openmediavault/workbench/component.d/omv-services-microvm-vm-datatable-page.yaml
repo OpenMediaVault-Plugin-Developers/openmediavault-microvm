@@ -42,6 +42,10 @@ data:
         prop: disk_size_mib
         flexGrow: 1
         sortable: true
+      - name: _("Data disks")
+        prop: data_disk_count
+        flexGrow: 1
+        sortable: true
       - name: _("Image")
         prop: image_desc
         flexGrow: 2
@@ -101,7 +105,7 @@ data:
               arg1: ""
       - type: iconButton
         icon: mdi:harddisk-plus
-        tooltip: _("Resize disk")
+        tooltip: _("Resize root disk")
         enabledConstraints:
           minSelected: 1
           maxSelected: 1
@@ -113,7 +117,7 @@ data:
         execute:
           type: formDialog
           formDialog:
-            title: _("Resize disk ...")
+            title: _("Resize root disk ...")
             fields:
               - type: hidden
                 name: vmuuid
@@ -466,7 +470,7 @@ data:
             icon: mdi:delete-outline
             confirmationDialogConfig:
               template: confirmation-danger
-              message: _("Are you sure you want to delete this VM? Its working directory (writable rootfs copy) will also be removed.")
+              message: _("Are you sure you want to delete this VM? Its working directory (writable rootfs copy) and all of its data disks, including those stored on other shared folders, will also be removed.")
             execute:
               type: request
               request:

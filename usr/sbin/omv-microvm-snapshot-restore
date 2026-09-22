@@ -32,13 +32,50 @@ SF_PATH=$(omv_get_sharedfolder_path "$SF_UUID")
 VM_DIR="${SF_PATH}/vms/${VMNAME}"
 mkdir -p "$VM_DIR"
 
+WARM=0
+if [ -f "${SNAPSHOT_DIR}/vmstate" ] && [ -f "${SNAPSHOT_DIR}/memfile" ]; then
+    WARM=1
+fi
+
+# Checked before anything is overwritten. Saved data disks go back to
+# wherever that disk lives now. A warm snapshot's device state has the
+# disk's path baked in, so one whose disk has since been removed can't be
+# loaded — a cold one just leaves it out.
+DISK_ROWS=$(omv-microvm-list-disks "$VMNAME") || die "Could not list data disks."
+declare -A DISK_PATHS=()
+while IFS=$'\t' read -r name path _ _ _; do
+    [ -n "$name" ] || continue
+    DISK_PATHS["$name"]="$path"
+done <<< "$DISK_ROWS"
+
+declare -a RESTORE_DISKS=()
+for saved in "${SNAPSHOT_DIR}"/disk-*.img; do
+    [ -f "$saved" ] || continue
+    name=$(basename "$saved" .img)
+    name="${name#disk-}"
+    if [ -z "${DISK_PATHS[$name]:-}" ]; then
+        if [ "$WARM" -eq 1 ]; then
+            die "Snapshot includes data disk '${name}', which no longer exists. Recreate a disk with that name on this VM first."
+        fi
+        _log "WARNING: snapshot includes data disk '${name}', which no longer exists — skipping it."
+        continue
+    fi
+    RESTORE_DISKS+=("$name")
+done
+
 _log "Overwriting current disk with snapshot's saved disk ..."
 cp --reflink=auto "${SNAPSHOT_DIR}/rootfs.ext4" "${VM_DIR}/rootfs.ext4"
+
+for name in "${RESTORE_DISKS[@]}"; do
+    _log "Overwriting data disk '${name}' with snapshot's saved copy ..."
+    mkdir -p "$(dirname "${DISK_PATHS[$name]}")"
+    cp --reflink=auto "${SNAPSHOT_DIR}/disk-${name}.img" "${DISK_PATHS[$name]}"
+done
 
 # Only warm snapshots (with memory/device state) need the next start to
 # load them over the API — a cold snapshot is just a disk, so a normal
 # cold boot afterward is already correct.
-if [ -f "${SNAPSHOT_DIR}/vmstate" ] && [ -f "${SNAPSHOT_DIR}/memfile" ]; then
+if [ "$WARM" -eq 1 ]; then
     printf '%s' "$SNAPSHOT_DIR" > "${VM_DIR}/.restore_from"
 fi
 

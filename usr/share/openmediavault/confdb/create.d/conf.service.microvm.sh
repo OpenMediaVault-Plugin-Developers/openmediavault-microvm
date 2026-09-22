@@ -30,6 +30,7 @@ if ! omv_config_exists "/config/services/microvm"; then
     omv_config_add_node "/config/services/microvm" "vms"
     omv_config_add_node "/config/services/microvm" "images"
     omv_config_add_node "/config/services/microvm" "networks"
+    omv_config_add_node "/config/services/microvm" "disks"
     omv_config_add_node "/config/services/microvm" "jobs"
 fi
 
@@ -51,6 +52,9 @@ if ! omv_config_exists "/config/services/microvm/images"; then
 fi
 if ! omv_config_exists "/config/services/microvm/networks"; then
     omv_config_add_node "/config/services/microvm" "networks"
+fi
+if ! omv_config_exists "/config/services/microvm/disks"; then
+    omv_config_add_node "/config/services/microvm" "disks"
 fi
 if ! omv_config_exists "/config/services/microvm/jobs"; then
     omv_config_add_node "/config/services/microvm" "jobs"

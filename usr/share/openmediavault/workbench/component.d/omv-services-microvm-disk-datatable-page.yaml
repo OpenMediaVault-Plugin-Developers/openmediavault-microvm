@@ -1,0 +1,159 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-disk-datatable-page
+  type: datatablePage
+  config:
+    autoReload: false
+    hasSearchField: true
+    stateId: 3c7d9e21-5b4a-4f8e-a6c2-9d0e1f2a3b4c
+    rowId: uuid
+    sorters:
+      - dir: asc
+        prop: vmref
+    store:
+      proxy:
+        service: MicroVm
+        get:
+          method: getDiskList
+    columns:
+      - name: _("VM")
+        prop: vmref
+        flexGrow: 1
+        sortable: true
+      - name: _("Name")
+        prop: name
+        flexGrow: 1
+        sortable: true
+      - name: _("Size (MiB)")
+        prop: disk_size_mib
+        flexGrow: 1
+        sortable: true
+      - name: _("Filesystem")
+        prop: fstype
+        flexGrow: 1
+        sortable: true
+      - name: _("Read-only")
+        prop: readonly
+        flexGrow: 1
+        sortable: true
+        cellTemplateName: checkIcon
+      - name: _("Backup")
+        prop: backup
+        flexGrow: 1
+        sortable: true
+        cellTemplateName: checkIcon
+      - name: _("VM state")
+        prop: state
+        flexGrow: 1
+        sortable: true
+        hidden: true
+      - name: _("Path")
+        prop: path
+        flexGrow: 3
+        sortable: true
+        hidden: true
+      - name: _("Notes")
+        prop: notes
+        flexGrow: 2
+        sortable: false
+        hidden: true
+    actions:
+      - template: create
+        execute:
+          type: url
+          url: "/services/microvm/disk/create"
+      - template: edit
+        execute:
+          type: url
+          url: "/services/microvm/disk/edit/{{ _selected[0].uuid }}"
+      - type: iconButton
+        icon: mdi:arrow-expand-horizontal
+        tooltip: _("Resize")
+        enabledConstraints:
+          minSelected: 1
+          maxSelected: 1
+          constraint:
+            - operator: ne
+              arg0:
+                prop: state
+              arg1: "running"
+        execute:
+          type: formDialog
+          formDialog:
+            title: _("Resize disk ...")
+            fields:
+              - type: hidden
+                name: uuid
+                value: "{{ _selected[0].uuid }}"
+              - type: textInput
+                name: current_size
+                label: _("Current size (MiB)")
+                value: "{{ _selected[0].disk_size_mib }}"
+                readonly: true
+                submitValue: false
+              - type: numberInput
+                name: size_mib
+                label: _("New size (MiB)")
+                hint: _("Must be larger than the current size — this only grows the disk, it never shrinks it. The VM must be stopped. A disk without a filesystem only grows the image; extend the partition or filesystem from inside the guest.")
+                validators:
+                  min: 1
+                  max: 16777216
+                  patternType: integer
+                  required: true
+            buttons:
+              submit:
+                text: _("Resize")
+                execute:
+                  type: taskDialog
+                  taskDialog:
+                    config:
+                      title: _("Resizing disk ...")
+                      startOnInit: true
+                      request:
+                        service: MicroVm
+                        method: resizeDataDisk
+                        params:
+                          uuid: "{{ uuid }}"
+                          size_mib: "{{ size_mib }}"
+      - type: iconButton
+        icon: delete
+        tooltip: _("Delete")
+        enabledConstraints:
+          minSelected: 1
+          maxSelected: 1
+          constraint:
+            - operator: ne
+              arg0:
+                prop: state
+              arg1: "running"
+        confirmationDialogConfig:
+          template: confirmation-danger
+          message: _("Are you sure you want to remove this disk from its VM?")
+        execute:
+          type: formDialog
+          formDialog:
+            title: _("Delete disk ...")
+            fields:
+              - type: hidden
+                name: uuid
+                value: "{{ _selected[0].uuid }}"
+              - type: checkbox
+                name: deletefile
+                label: _("Also delete the disk image")
+                value: true
+                hint: _("Permanently deletes the disk's data. Leave unchecked to only detach it from the VM; creating a disk with the same VM, name and storage later reattaches the kept image.")
+            buttons:
+              submit:
+                text: _("Delete")
+                execute:
+                  type: request
+                  request:
+                    service: MicroVm
+                    method: deleteDisk
+                    params:
+                      uuid: "{{ uuid }}"
+                      deletefile: "{{ deletefile }}"
+                    progressMessage: _("Deleting ...")
+                    successNotification: _("Deleted.")
+                    task: false

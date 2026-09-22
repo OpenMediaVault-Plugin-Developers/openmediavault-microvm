@@ -1,0 +1,95 @@
+version: "1.0"
+type: component
+data:
+  name: omv-services-microvm-disk-form-page
+  type: formPage
+  config:
+    request:
+      service: MicroVm
+      get:
+        method: getDisk
+        params:
+          uuid: "{{ _routeParams.uuid }}"
+      post:
+        method: setDisk
+    fields:
+      - type: confObjUuid
+      - type: select
+        name: vmref
+        label: _("VM")
+        placeholder: _("Select a VM ...")
+        textField: name
+        valueField: name
+        value: ""
+        store:
+          proxy:
+            service: MicroVm
+            get:
+              method: enumerateVmNames
+        hint: _("Fixed once the disk is created. A new disk is attached the next time the VM starts.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
+        validators:
+          required: true
+      - type: textInput
+        name: name
+        label: _("Name")
+        value: ""
+        hint: _("Up to 16 letters, digits or underscores. Fixed once the disk is created. Disks are attached in name order after the root disk (/dev/vdb, /dev/vdc, ...); an ext4 disk is also labelled with its name, so the guest can mount it by LABEL.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
+        validators:
+          required: true
+          maxLength: 16
+          pattern:
+            pattern: "^[a-zA-Z0-9_]+$"
+            errorData: _("Only letters, digits and underscores are allowed.")
+      - type: sharedFolderSelect
+        name: sharedfolderref
+        label: _("Storage")
+        hasEmptyOption: true
+        hasCreateButton: false
+        hint: _("Shared folder to store the disk image on. Leave empty to keep it with the VM on the VM storage shared folder. Fixed once the disk is created. If an image with this VM and disk name already exists there, it is reattached as-is.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
+      - type: numberInput
+        name: size_mib
+        label: _("Size (MiB)")
+        value: 1024
+        hint: _("Created sparse, so it only takes up space as the guest writes to it. Use Resize on the Disks tab to grow an existing disk.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
+        validators:
+          min: 1
+          max: 16777216
+          patternType: integer
+          required: true
+      - type: select
+        name: fstype
+        label: _("Filesystem")
+        value: "ext4"
+        store:
+          data:
+            - ["ext4", _("ext4")]
+            - ["none", _("None (raw, formatted by the guest)")]
+        hint: _("Fixed once the disk is created.")
+        disabled: "{{ _routeConfig.data.editing | toboolean }}"
+      - type: checkbox
+        name: readonly
+        label: _("Read-only")
+        value: false
+        hint: _("Takes effect the next time the VM starts.")
+      - type: checkbox
+        name: backup
+        label: _("Include in snapshots and backups")
+        value: true
+        hint: _("Turn off for large disks whose data is backed up some other way. An excluded disk is left as it is when a snapshot or backup is restored.")
+      - type: textInput
+        name: notes
+        label: _("Notes")
+        value: ""
+    buttons:
+      - template: submit
+        execute:
+          type: url
+          url: /services/microvm/disk
+      - template: cancel
+        execute:
+          type: url
+          url: /services/microvm/disk

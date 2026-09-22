@@ -47,6 +47,12 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $this->registerMethod('doCommand');
         $this->registerMethod('resizeDisk');
 
+        $this->registerMethod('getDiskList');
+        $this->registerMethod('getDisk');
+        $this->registerMethod('setDisk');
+        $this->registerMethod('deleteDisk');
+        $this->registerMethod('resizeDataDisk');
+
         $this->registerMethod('getImageList');
         $this->registerMethod('enumerateImages');
         $this->registerMethod('getImageCatalog');
@@ -100,6 +106,31 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
     private function snapshotsDir($context, $vmName)
     {
         return sprintf("%s/%s/snapshots", $this->vmsDir($context), $vmName);
+    }
+
+    // Data disks on the VM storage shared folder live inside the VM's own
+    // directory; ones placed on another shared folder get a per-VM
+    // subdirectory there. Must match omv-microvm-list-disks.
+    private function diskPath($context, $disk)
+    {
+        $sfref = $disk->get('sharedfolderref');
+        if (is_uuid($sfref)) {
+            $sfpath = \OMV\Rpc\Rpc::call("ShareMgmt", "getPath", ["uuid" => $sfref], $context);
+            return sprintf("%s/microvm-disks/%s/%s.img", rtrim($sfpath, '/'),
+                $disk->get('vmref'), $disk->get('name'));
+        }
+        return sprintf("%s/%s/disks/%s.img", $this->vmsDir($context),
+            $disk->get('vmref'), $disk->get('name'));
+    }
+
+    private function vmDisks($vmName)
+    {
+        $db = \OMV\Config\Database::getInstance();
+        return $db->getByFilter("conf.service.microvm.disk", [
+            "operator" => "stringEquals",
+            "arg0" => "vmref",
+            "arg1" => $vmName
+        ]);
     }
 
     private function unitName($name)
@@ -237,6 +268,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $object = $db->get("conf.service.microvm");
         $object->remove("vms");
         $object->remove("images");
+        $object->remove("disks");
         $assoc = $object->getAssoc();
         $assoc['firecracker_version'] = $this->getFirecrackerVersion();
         return $assoc;
@@ -266,6 +298,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $db->set($object);
         $object->remove("vms");
         $object->remove("images");
+        $object->remove("disks");
         return $object->getAssoc();
     }
 
@@ -398,6 +431,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             $rootfsPath = sprintf("%s/%s/rootfs.ext4", $this->vmsDir($context), $assoc['name']);
             $assoc['disk_size_mib'] = file_exists($rootfsPath)
                 ? (int) ceil(filesize($rootfsPath) / 1048576) : null;
+            $assoc['data_disk_count'] = count($this->vmDisks($assoc['name']));
             $objects[] = $assoc;
         }
         return $this->applyFilter($objects, $params['start'], $params['limit'],
@@ -558,6 +592,14 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             case 'delete':
                 $this->systemctlQuiet(['stop', $unit]);
                 $this->systemctlQuiet(['disable', $unit]);
+                // Data disks go with the VM, wherever they're stored.
+                foreach ($this->vmDisks($name) as $disk) {
+                    $diskPath = $this->diskPath($context, $disk);
+                    if (file_exists($diskPath)) {
+                        unlink($diskPath);
+                    }
+                    $db->delete($disk);
+                }
                 $vmDir = sprintf("%s/%s", $this->vmsDir($context), $name);
                 if (is_dir($vmDir)) {
                     $rmCmd = new \OMV\System\Process('rm', ['-rf', $vmDir]);
@@ -623,6 +665,176 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                 if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
                     throw new \OMV\ExecException($cmdLine, $output);
                 }
+                return $output;
+            }
+        );
+    }
+
+    public function getDiskList($params, $context)
+    {
+        $this->validateMethodContext($context, ["role" => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.getlist");
+        $db = \OMV\Config\Database::getInstance();
+        $objects = [];
+        foreach ($db->get("conf.service.microvm.disk") as $object) {
+            $assoc = $object->getAssoc();
+            $path = $this->diskPath($context, $object);
+            $assoc['path'] = $path;
+            // Actual file size rather than the configured one, which only
+            // records the size it was created or last resized to.
+            $assoc['disk_size_mib'] = file_exists($path)
+                ? (int) ceil(filesize($path) / 1048576) : null;
+            $assoc['state'] = $this->getActiveState($object->get('vmref'));
+            $objects[] = $assoc;
+        }
+        return $this->applyFilter($objects, $params['start'], $params['limit'],
+            $params['sortfield'], $params['sortdir']);
+    }
+
+    public function getDisk($params, $context)
+    {
+        $this->validateMethodContext($context, ["role" => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.common.objectuuid");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.disk", $params['uuid']);
+        return $object->getAssoc();
+    }
+
+    public function setDisk($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.setdisk");
+        $db = \OMV\Config\Database::getInstance();
+        $object = new \OMV\Config\ConfigObject("conf.service.microvm.disk");
+        $object->setAssoc($params);
+        if (FALSE === $object->isNew()) {
+            // Only the attach options can change on an existing disk; its
+            // size changes through resizeDataDisk.
+            $existing = $db->get("conf.service.microvm.disk", $object->get('uuid'));
+            foreach (['vmref', 'name', 'sharedfolderref', 'fstype'] as $key) {
+                if ($existing->get($key) !== $object->get($key)) {
+                    throw new \OMV\Exception(gettext(
+                        "The VM, name, storage location and filesystem can only be set when a disk is created."
+                    ));
+                }
+            }
+            $object->set('size_mib', $existing->get('size_mib'));
+            $db->set($object);
+            return $object->getAssoc();
+        }
+
+        // Also the drive id Firecracker attaches it under, next to the
+        // root drive's.
+        if ('rootfs' === $object->get('name')) {
+            throw new \OMV\Exception(gettext("'rootfs' is reserved and can't be used as a disk name."));
+        }
+        $this->getVmObjectByName($object->get('vmref'));
+        $db->assertIsUniqueByFilter($object, [
+            "operator" => "and",
+            "arg0" => ["operator" => "stringEquals", "arg0" => "vmref", "arg1" => $object->get('vmref')],
+            "arg1" => ["operator" => "stringEquals", "arg0" => "name", "arg1" => $object->get('name')]
+        ], sprintf(gettext("VM '%s' already has a disk named '%s'."),
+            $object->get('vmref'), $object->get('name')));
+
+        $path = $this->diskPath($context, $object);
+        if (file_exists($path)) {
+            // Reattach a disk image left behind by an earlier "keep file"
+            // delete, as-is.
+            $object->set('size_mib', (int) ceil(filesize($path) / 1048576));
+        } else {
+            $this->createDiskImage($path, $object->get('size_mib'),
+                $object->get('fstype'), $object->get('name'));
+        }
+        $db->set($object);
+        return $object->getAssoc();
+    }
+
+    // Sparse, so creation is quick and only written blocks take up space.
+    private function createDiskImage($path, $sizeMib, $fstype, $label)
+    {
+        $dir = dirname($path);
+        if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+            throw new \OMV\Exception(sprintf(gettext("Failed to create directory '%s'."), $dir));
+        }
+        $cmd = new \OMV\System\Process('truncate', ['-s', sprintf("%dM", $sizeMib), $path]);
+        $cmd->execute();
+        if ('ext4' !== $fstype) {
+            return;
+        }
+        $cmd = new \OMV\System\Process('mkfs.ext4', ['-q', '-F', '-L', $label, $path]);
+        $cmd->setRedirect2to1();
+        $cmd->setQuiet(true);
+        $cmd->execute($output, $exitStatus);
+        if (0 !== $exitStatus) {
+            @unlink($path);
+            throw new \OMV\Exception("%s\n%s", gettext("Failed to create filesystem."),
+                implode(PHP_EOL, $output));
+        }
+    }
+
+    public function deleteDisk($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.deletedisk");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.disk", $params['uuid']);
+        $vmName = $object->get('vmref');
+        $state = $this->getActiveState($vmName);
+        if (!in_array($state, ['stopped', 'error'], true)) {
+            throw new \OMV\Exception(sprintf(
+                gettext("VM '%s' is %s; it must be stopped before a disk can be removed."), $vmName, $state));
+        }
+        // Boolean or "true"/"false": the delete dialog's param goes through
+        // the same string-only workbench templating as resizeDisk's size_mib.
+        if (TRUE === filter_var($params['deletefile'], FILTER_VALIDATE_BOOLEAN)) {
+            $path = $this->diskPath($context, $object);
+            if (file_exists($path)) {
+                unlink($path);
+            }
+        }
+        $db->delete($object);
+        return $object->getAssoc();
+    }
+
+    public function resizeDataDisk($params, $context)
+    {
+        $this->validateMethodContext($context, ['role' => OMV_ROLE_ADMINISTRATOR]);
+        $this->validateMethodParams($params, "rpc.microvm.resizedatadisk");
+        $db = \OMV\Config\Database::getInstance();
+        $object = $db->get("conf.service.microvm.disk", $params['uuid']);
+        $vmName = $object->get('vmref');
+        $diskName = $object->get('name');
+        $state = $this->getActiveState($vmName);
+        if (!in_array($state, ['stopped', 'error'], true)) {
+            throw new \OMV\Exception(sprintf(
+                gettext("VM '%s' is %s; it must be stopped before its disks can be resized."), $vmName, $state));
+        }
+        $path = $this->diskPath($context, $object);
+        if (!file_exists($path)) {
+            throw new \OMV\Exception(sprintf(gettext("Disk image '%s' is missing."), $path));
+        }
+        // String for the same reason as resizeDisk's size_mib.
+        $sizeMib = (int) $params['size_mib'];
+        if ($sizeMib < 1 || $sizeMib > 16777216) {
+            throw new \OMV\Exception(gettext("New size must be between 1 and 16777216 MiB."));
+        }
+        $currentMib = (int) ceil(filesize($path) / 1048576);
+        if ($sizeMib <= $currentMib) {
+            throw new \OMV\Exception(sprintf(
+                gettext("New size (%d MiB) must be larger than the current disk size (%d MiB). Shrinking is not supported."),
+                $sizeMib, $currentMib));
+        }
+
+        return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
+            use ($vmName, $diskName, $sizeMib, $object, $db) {
+                $cmd = new \OMV\System\Process('omv-microvm-resize-disk', [$vmName, $sizeMib, $diskName]);
+                $cmd->setRedirect2to1();
+                $cmdLine = $cmd->getCommandLine();
+                if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
+                    throw new \OMV\ExecException($cmdLine, $output);
+                }
+                $object->set('size_mib', $sizeMib);
+                $db->set($object);
                 return $output;
             }
         );
@@ -869,8 +1081,8 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                     throw new \OMV\ExecException($cmdLine, $output);
                 }
                 $size = 0;
-                foreach (['memfile', 'vmstate', 'rootfs.ext4'] as $f) {
-                    $size += @filesize(sprintf("%s/%s", $snapshotDir, $f)) ?: 0;
+                foreach (glob(sprintf("%s/*", $snapshotDir)) as $f) {
+                    $size += @filesize($f) ?: 0;
                 }
                 $meta = [
                     'name' => $snapshotName,

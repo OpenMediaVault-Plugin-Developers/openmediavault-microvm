@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-list-disks — print a VM's data disks, one per line, sorted by
+# name — the order omv-microvm-run attaches them in (/dev/vdb, /dev/vdc,
+# ...):
+#
+#   <name> TAB <path> TAB <readonly 0|1> TAB <backup 0|1> TAB <fstype>
+#
+# Single source of the on-disk path derivation for the shell side; must
+# match diskPath() in the RPC service.
+#
+# Usage: omv-microvm-list-disks <vm-name>
+
+set -eu
+
+. /usr/share/openmediavault/scripts/helper-functions
+
+VMNAME="${1:?usage: omv-microvm-list-disks <vm-name>}"
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+# Must match the derivation in omv-microvm-run.
+SF_UUID=$(omv_config_get "/config/services/microvm/sharedfolderref")
+omv_isuuid "$SF_UUID" || die "No shared folder configured for VM storage."
+SF_PATH=$(omv_get_sharedfolder_path "$SF_UUID")
+[ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
+VM_DIR="${SF_PATH}/vms/${VMNAME}"
+
+# "|"-joined rather than tab-separated: tab is IFS whitespace, so `read`
+# would collapse the empty sharedfolderref field. Neither disk nor VM
+# names can contain "|" (see rpc.microvm.setdisk). xmlstarlet exits 1 when
+# nothing matches, which just means "no disks".
+ROWS=$(xmlstarlet sel -t -m "//services/microvm/disks/disk[vmref='${VMNAME}']" -s A:T:- name \
+    -v "concat(name,'|',sharedfolderref,'|',readonly,'|',backup,'|',fstype)" -n \
+    "$OMV_CONFIG_FILE" || true)
+
+while IFS='|' read -r name sfref readonly backup fstype; do
+    [ -n "$name" ] || continue
+    if omv_isuuid "$sfref"; then
+        disk_sf_path=$(omv_get_sharedfolder_path "$sfref")
+        [ -n "$disk_sf_path" ] || die "Could not resolve shared folder path for disk '${name}'."
+        path="${disk_sf_path}/microvm-disks/${VMNAME}/${name}.img"
+    else
+        path="${VM_DIR}/disks/${name}.img"
+    fi
+    omv_checkyesno "$readonly" && readonly=1 || readonly=0
+    omv_checkyesno "$backup" && backup=1 || backup=0
+    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$path" "$readonly" "$backup" "${fstype:-ext4}"
+done <<< "$ROWS"
+
+exit 0

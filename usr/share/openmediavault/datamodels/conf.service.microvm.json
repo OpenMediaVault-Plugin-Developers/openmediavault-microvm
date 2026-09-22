@@ -181,6 +181,68 @@
         }
       }
     },
+    "disks": {
+      "type": "object",
+      "properties": {
+        "disk": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uuid": {
+                "type": "string",
+                "format": "uuidv4"
+              },
+              "vmref": {
+                "type": "string",
+                "default": ""
+              },
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "sharedfolderref": {
+                "type": "string",
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "format": "uuidv4"
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 0
+                  }
+                ],
+                "default": ""
+              },
+              "size_mib": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16777216,
+                "default": 1024
+              },
+              "fstype": {
+                "type": "string",
+                "enum": ["ext4", "none"],
+                "default": "ext4"
+              },
+              "readonly": {
+                "type": "boolean",
+                "default": false
+              },
+              "backup": {
+                "type": "boolean",
+                "default": true
+              },
+              "notes": {
+                "type": "string",
+                "default": ""
+              }
+            }
+          }
+        }
+      }
+    },
     "jobs": {
       "type": "object",
       "properties": {

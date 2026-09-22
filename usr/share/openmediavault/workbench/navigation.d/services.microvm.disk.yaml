@@ -1,0 +1,8 @@
+version: "1.0"
+type: navigation-item
+data:
+  path: "services.microvm.disk"
+  text: _("Disks")
+  position: 12
+  icon: mdi:harddisk-plus
+  url: "/services/microvm/disk"

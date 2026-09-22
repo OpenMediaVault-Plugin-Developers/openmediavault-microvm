@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 #
-# omv-microvm-resize-disk — grow a VM's writable rootfs image in place.
+# omv-microvm-resize-disk — grow a VM's writable rootfs image, or one of
+# its data disks, in place.
 #
-# Grow-only: extends the backing file, then resize2fs to fill it. There is
+# Grow-only: extends the backing file, then resize2fs to fill it (skipped
+# for a data disk with no filesystem — the guest owns that layout). There is
 # deliberately no shrink path — safely shrinking a raw ext4 image needs an
 # offline e2fsck + resize2fs(shrink) + truncate sequence with real
 # data-loss risk if interrupted partway, and a snapshot/backup already
 # covers "get space back by starting fresh".
 #
-# Usage: omv-microvm-resize-disk <vm-name> <new-size-mib>
+# Usage: omv-microvm-resize-disk <vm-name> <new-size-mib> [<data-disk-name>]
 
 set -eu
 
@@ -16,6 +18,7 @@ set -eu
 
 VMNAME="${1:?usage: omv-microvm-resize-disk <vm-name> <new-size-mib>}"
 NEW_SIZE_MIB="${2:?usage: omv-microvm-resize-disk <vm-name> <new-size-mib>}"
+DISK_NAME="${3:-}"
 
 _log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
@@ -41,34 +44,51 @@ omv_isuuid "$SF_UUID" || die "No shared folder configured for VM storage."
 SF_PATH=$(omv_get_sharedfolder_path "$SF_UUID")
 [ -n "$SF_PATH" ] || die "Could not resolve shared folder path."
 VM_DIR="${SF_PATH}/vms/${VMNAME}"
-ROOTFS_PATH="${VM_DIR}/rootfs.ext4"
-[ -f "$ROOTFS_PATH" ] || die "Rootfs missing: ${ROOTFS_PATH}"
+DISK_PATH="${VM_DIR}/rootfs.ext4"
+FSTYPE="ext4"
+if [ -n "$DISK_NAME" ]; then
+    DISK_PATH=""
+    while IFS=$'\t' read -r name path _ _ fstype; do
+        if [ "$name" = "$DISK_NAME" ]; then
+            DISK_PATH="$path"
+            FSTYPE="$fstype"
+        fi
+    done <<< "$(omv-microvm-list-disks "$VMNAME")"
+    [ -n "$DISK_PATH" ] || die "VM has no data disk named '${DISK_NAME}'."
+fi
+[ -f "$DISK_PATH" ] || die "Disk missing: ${DISK_PATH}"
 
-CURRENT_BYTES=$(stat -c%s "$ROOTFS_PATH")
+CURRENT_BYTES=$(stat -c%s "$DISK_PATH")
 NEW_BYTES=$((NEW_SIZE_MIB * 1024 * 1024))
 if [ "$NEW_BYTES" -le "$CURRENT_BYTES" ]; then
     die "New size (${NEW_SIZE_MIB} MiB) must be larger than the current size ($((CURRENT_BYTES / 1048576)) MiB); shrinking is not supported."
 fi
 
 DELTA_BYTES=$((NEW_BYTES - CURRENT_BYTES))
-AVAIL_BYTES=$(df --output=avail -B1 "$VM_DIR" | tail -n1 | tr -d ' ')
+AVAIL_BYTES=$(df --output=avail -B1 "$(dirname "$DISK_PATH")" | tail -n1 | tr -d ' ')
 if [ "$AVAIL_BYTES" -lt "$DELTA_BYTES" ]; then
     die "Not enough free space on the shared folder (need ${DELTA_BYTES} more bytes, ${AVAIL_BYTES} available)."
 fi
 
-_log "Checking filesystem before resize ..."
-e2fsck -f -p "$ROOTFS_PATH" || {
-    ec=$?
-    # e2fsck exit codes: 0 = clean, 1 = errors corrected — both fine to
-    # proceed from; anything higher means it couldn't fix it safely.
-    [ "$ec" -le 1 ] || die "Filesystem check failed (exit ${ec}); refusing to resize."
-}
+if [ "$FSTYPE" = "ext4" ]; then
+    _log "Checking filesystem before resize ..."
+    e2fsck -f -p "$DISK_PATH" || {
+        ec=$?
+        # e2fsck exit codes: 0 = clean, 1 = errors corrected — both fine to
+        # proceed from; anything higher means it couldn't fix it safely.
+        [ "$ec" -le 1 ] || die "Filesystem check failed (exit ${ec}); refusing to resize."
+    }
+fi
 
-_log "Growing rootfs to ${NEW_SIZE_MIB} MiB ..."
-truncate -s "${NEW_SIZE_MIB}M" "$ROOTFS_PATH"
+_log "Growing ${DISK_NAME:-rootfs} to ${NEW_SIZE_MIB} MiB ..."
+truncate -s "${NEW_SIZE_MIB}M" "$DISK_PATH"
 
-_log "Resizing filesystem to fill the new disk ..."
-resize2fs "$ROOTFS_PATH"
+if [ "$FSTYPE" = "ext4" ]; then
+    _log "Resizing filesystem to fill the new disk ..."
+    resize2fs "$DISK_PATH"
+else
+    _log "Disk has no filesystem; grow the partition/filesystem from inside the guest."
+fi
 
 _log "Resize complete."
 exit 0

@@ -158,6 +158,23 @@ if [ -n "$MACADDR" ]; then
 fi
 
 if [ "$RESTORE_MODE" -eq 0 ]; then
+    # Data disks follow the rootfs in name order, so the guest sees them as
+    # /dev/vdb, /dev/vdc, ... — ext4 ones are also labelled with the disk
+    # name, which is the stabler thing to mount by.
+    DATA_DRIVES_JSON="[]"
+    DISK_ROWS=$(omv-microvm-list-disks "$VMNAME") || die "Could not list data disks."
+    while IFS=$'\t' read -r disk_name disk_path disk_readonly _ _; do
+        [ -n "$disk_name" ] || continue
+        [ -f "$disk_path" ] || die "Data disk '${disk_name}' missing: ${disk_path}"
+        DATA_DRIVES_JSON=$(jq -c \
+            --arg id "$disk_name" \
+            --arg path "$disk_path" \
+            --argjson ro "$([ "$disk_readonly" -eq 1 ] && echo true || echo false)" \
+            '. + [{"drive_id": $id, "path_on_host": $path, "is_root_device": false, "is_read_only": $ro}]' \
+            <<< "$DATA_DRIVES_JSON")
+        _log "Attaching data disk '${disk_name}' ($([ "$disk_readonly" -eq 1 ] && echo ro || echo rw)): ${disk_path}"
+    done <<< "$DISK_ROWS"
+
     jq -n \
         --arg kernel "$KERNEL_PATH" \
         --arg bootargs "$BOOTARGS" \
@@ -165,17 +182,18 @@ if [ "$RESTORE_MODE" -eq 0 ]; then
         --argjson vcpus "$VCPUS" \
         --argjson mem "$MEMORY_MIB" \
         --argjson netif "$NETIF_JSON" \
+        --argjson datadrives "$DATA_DRIVES_JSON" \
         '{
             "boot-source": {
                 "kernel_image_path": $kernel,
                 "boot_args": $bootargs
             },
-            "drives": [{
+            "drives": ([{
                 "drive_id": "rootfs",
                 "path_on_host": $rootfs,
                 "is_root_device": true,
                 "is_read_only": false
-            }],
+            }] + $datadrives),
             "network-interfaces": [$netif],
             "machine-config": {
                 "vcpu_count": $vcpus,

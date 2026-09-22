@@ -4,6 +4,10 @@
 # If it's running, also pauses it and dumps memory/device state first
 # (warm snapshot); if not, just copies the disk (cold snapshot).
 #
+# Data disks are copied alongside as disk-<name>.img, except those with
+# "include in snapshots and backups" turned off — those are left out and
+# keep whatever contents they have at restore time.
+#
 # Usage: omv-microvm-snapshot-create <vm-name> <snapshot-dir>
 
 set -eu
@@ -35,11 +39,28 @@ VM_DIR="${SF_PATH}/vms/${VMNAME}"
 ROOTFS_PATH="${VM_DIR}/rootfs.ext4"
 [ -f "$ROOTFS_PATH" ] || die "Rootfs missing: ${ROOTFS_PATH}"
 
+DISK_ROWS=$(omv-microvm-list-disks "$VMNAME") || die "Could not list data disks."
+
+copy_disks() {
+    cp --reflink=auto "$ROOTFS_PATH" "${SNAPSHOT_DIR}/rootfs.ext4"
+    local name path backup
+    while IFS=$'\t' read -r name path _ backup _; do
+        [ -n "$name" ] || continue
+        if [ "$backup" -ne 1 ]; then
+            _log "Skipping data disk '${name}' (excluded from snapshots and backups)."
+            continue
+        fi
+        [ -f "$path" ] || die "Data disk '${name}' missing: ${path}"
+        _log "Copying data disk '${name}' ..."
+        cp --reflink=auto "$path" "${SNAPSHOT_DIR}/disk-${name}.img"
+    done <<< "$DISK_ROWS"
+}
+
 mkdir -p "$SNAPSHOT_DIR"
 
 if [ ! -S "$SOCKET_PATH" ]; then
-    _log "VM not running — copying disk only (cold snapshot)."
-    cp --reflink=auto "$ROOTFS_PATH" "${SNAPSHOT_DIR}/rootfs.ext4"
+    _log "VM not running — copying disks only (cold snapshot)."
+    copy_disks
     _log "Snapshot complete."
     exit 0
 fi
@@ -81,9 +102,9 @@ _fc_api PUT /snapshot/create "$(jq -n \
     --arg state "${SNAPSHOT_DIR}/vmstate" \
     '{"mem_file_path": $mem, "snapshot_path": $state, "snapshot_type": "Full"}')"
 
-# Before resuming, so the disk copy stays consistent with the memory dump.
-_log "Copying disk ..."
-cp --reflink=auto "$ROOTFS_PATH" "${SNAPSHOT_DIR}/rootfs.ext4"
+# Before resuming, so the disk copies stay consistent with the memory dump.
+_log "Copying disks ..."
+copy_disks
 
 _log "Resuming VM ..."
 _fc_api PATCH /vm '{"state":"Resumed"}'

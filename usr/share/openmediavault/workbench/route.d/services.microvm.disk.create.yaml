@@ -1,0 +1,7 @@
+version: "1.0"
+type: route
+data:
+  url: "/services/microvm/disk/create"
+  title: _("Create")
+  notificationTitle: _("Created disk.")
+  component: omv-services-microvm-disk-form-page
