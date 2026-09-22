@@ -22,3 +22,16 @@ it and repacks it as a plain ext4 image before ever booting it, and
 whenever an image's `rootfs_url` ends in `.squashfs`. Everything downstream
 (`omv-microvm-run`, the datamodel) only ever sees a single `rootfs.ext4`
 file, regardless of which format the source used.
+
+Data disks (Disks tab) are extra block devices attached after the rootfs,
+in name order — `/dev/vdb`, `/dev/vdc`, ... Firecracker has no hotplug, so
+a new disk shows up the next time the VM starts. An ext4 disk is labelled
+with its name; mount it by label so that adding or removing another disk
+can't change which device it is, e.g. in the guest's `/etc/fstab`:
+
+    LABEL=data  /data  ext4  defaults,nofail  0  2
+
+A disk image lives in the VM's own directory by default, or under
+`microvm-disks/<vm>/` on another shared folder if one is chosen. It is
+copied into snapshots and backups as `disk-<name>.img` unless "Include in
+snapshots and backups" is turned off.
