@@ -153,6 +153,7 @@ OMV_NEW_UUID=$(grep -oP 'OMV_CONFIGOBJECT_NEW_UUID="\K[^"]+' /etc/default/openme
 VM_UUID=""
 JOB_UUID=""
 NETWORK_UUID=""
+DISK_UUID=""
 
 pre_cleanup() {
     local list='{"start":0,"limit":100,"sortfield":"name","sortdir":"ASC"}'
@@ -192,6 +193,10 @@ cleanup() {
     if [ -n "$JOB_UUID" ]; then
         info "Deleting test job $JOB_UUID"
         omv-rpc -u admin "MicroVm" "deleteJob" "{\"uuid\":\"$JOB_UUID\"}" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$DISK_UUID" ]; then
+        info "Deleting test disk $DISK_UUID"
+        omv-rpc -u admin "MicroVm" "deleteDisk" "{\"uuid\":\"$DISK_UUID\",\"deletefile\":true}" >/dev/null 2>&1 || true
     fi
     if [ -n "$VM_UUID" ]; then
         info "Deleting test VM $VM_UUID"
@@ -750,6 +755,174 @@ else
     _skip "resizeDisk (grow, real disk)" "no vm uuid or real image"
     _skip "Rootfs file grew to the requested size" "no vm uuid or real image"
     _skip "Filesystem is clean after resize" "no vm uuid or real image"
+fi
+
+# ---------------------------------------------------------------------------
+# 6b. Data disks
+# ---------------------------------------------------------------------------
+section "Data disks"
+
+assert_rpc "getDiskList" "MicroVm" "getDiskList" \
+    '{"start":0,"limit":25,"sortfield":"name","sortdir":"ASC"}' '"total"'
+
+disk_params() {
+    # disk_params <uuid> <name> [<vmref>] [<readonly>] [<notes>]
+    python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$1', 'vmref': '${3:-omvtest_microvm}', 'name': '$2',
+    'sharedfolderref': '', 'size_mib': 64, 'fstype': 'ext4',
+    'readonly': ${4:-False}, 'backup': True, 'notes': '${5:-}'
+}))"
+}
+
+assert_rpc_fails "setDisk (unknown VM)" "MicroVm" "setDisk" \
+    "$(disk_params "$OMV_NEW_UUID" omvtestdisk omvtest_no_such_vm)"
+assert_rpc_fails "setDisk (reserved name 'rootfs')" "MicroVm" "setDisk" \
+    "$(disk_params "$OMV_NEW_UUID" rootfs)"
+assert_rpc_fails "setDisk (invalid name)" "MicroVm" "setDisk" \
+    "$(disk_params "$OMV_NEW_UUID" 'bad-name')"
+
+if [ -n "$VM_UUID" ] && [ -n "$SF_PATH" ]; then
+    # Independent of whatever state earlier sections left the VM in.
+    omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+    wait_for_state stopped 30 || true
+
+    DISK_FILE="${SF_PATH%/}/vms/omvtest_microvm/disks/omvtestdisk.img"
+    rm -f "$DISK_FILE"
+
+    assert_rpc "setDisk (create)" "MicroVm" "setDisk" "$(disk_params "$OMV_NEW_UUID" omvtestdisk)"
+    DISK_UUID=$(json_uuid "$RPC_OUT")
+    info "Created disk uuid=$DISK_UUID"
+
+    if [ -f "$DISK_FILE" ] && [ "$(stat -c%s "$DISK_FILE")" -eq $((64 * 1048576)) ]; then
+        _pass "Disk image created at the requested size"
+    else
+        _fail "Disk image created at the requested size" "missing or wrong size: $DISK_FILE"
+    fi
+    if [ "$(blkid -o value -s LABEL "$DISK_FILE" 2>/dev/null)" = "omvtestdisk" ]; then
+        _pass "Disk image is ext4 labelled with the disk name"
+    else
+        _fail "Disk image is ext4 labelled with the disk name" "blkid: $(blkid "$DISK_FILE" 2>&1)"
+    fi
+
+    assert_rpc_fails "setDisk (duplicate name on same VM)" "MicroVm" "setDisk" \
+        "$(disk_params "$OMV_NEW_UUID" omvtestdisk)"
+
+    if [ -n "$DISK_UUID" ]; then
+        assert_rpc "getDisk" "MicroVm" "getDisk" "{\"uuid\":\"$DISK_UUID\"}" '"omvtestdisk"'
+        assert_rpc "setDisk (update options)" "MicroVm" "setDisk" \
+            "$(disk_params "$DISK_UUID" omvtestdisk omvtest_microvm True updated)" 'updated'
+        assert_rpc_fails "setDisk (rename existing disk)" "MicroVm" "setDisk" \
+            "$(disk_params "$DISK_UUID" omvtestrenamed)"
+        assert_rpc "setDisk (back to read-write)" "MicroVm" "setDisk" \
+            "$(disk_params "$DISK_UUID" omvtestdisk)"
+
+        assert_rpc "getVmList shows data_disk_count" "MicroVm" "getVmList" \
+            '{"start":0,"limit":100,"sortfield":"name","sortdir":"ASC"}' '"data_disk_count": *1'
+
+        assert_rpc_fails "resizeDataDisk (shrink rejected)" "MicroVm" "resizeDataDisk" \
+            "{\"uuid\":\"$DISK_UUID\",\"size_mib\":\"32\"}"
+        RESIZE_OUT=$(omv-rpc -u admin "MicroVm" "resizeDataDisk" \
+            "{\"uuid\":\"$DISK_UUID\",\"size_mib\":\"96\"}" 2>&1)
+        if BG_RESULT=$(wait_bg "$RESIZE_OUT" 60); then
+            _pass "resizeDataDisk (grow)"
+        else
+            _fail "resizeDataDisk (grow)" "$(echo "$BG_RESULT" | tail -5)"
+        fi
+        if [ "$(stat -c%s "$DISK_FILE" 2>/dev/null || echo 0)" -eq $((96 * 1048576)) ] \
+            && e2fsck -fn "$DISK_FILE" >/dev/null 2>&1; then
+            _pass "Data disk grew and its filesystem is clean"
+        else
+            _fail "Data disk grew and its filesystem is clean" "size=$(stat -c%s "$DISK_FILE" 2>/dev/null)"
+        fi
+
+        if [ -n "$REAL_IMAGE_REF" ]; then
+            assert_rpc "doCommand start (with data disk)" "MicroVm" "doCommand" \
+                "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
+            if wait_for_state running 60; then
+                _pass "VM with a data disk reaches 'running' state"
+            else
+                _fail "VM with a data disk reaches 'running' state" "state=$(vm_state) after waiting"
+            fi
+            # Asks the live VMM rather than reading vm_config.json: the unit
+            # is Type=simple, so 'running' is reported as soon as
+            # omv-microvm-run forks — before it has rewritten the config
+            # file, which still holds the previous boot's drives until then.
+            FC_SOCKET="/run/openmediavault-microvm/omvtest_microvm/firecracker.socket"
+            FC_DRIVES=""
+            for _ in $(seq 1 30); do
+                if [ -S "$FC_SOCKET" ]; then
+                    FC_DRIVES=$(curl -sS --unix-socket "$FC_SOCKET" 'http://localhost/vm/config' 2>/dev/null \
+                        | jq -c '[.drives[]?.drive_id]' 2>/dev/null)
+                    [ -n "$FC_DRIVES" ] && break
+                fi
+                sleep 1
+            done
+            if echo "$FC_DRIVES" | jq -e 'index("omvtestdisk")' >/dev/null 2>&1; then
+                _pass "Data disk is attached to the running VM"
+            else
+                _fail "Data disk is attached to the running VM" \
+                    "drives=${FC_DRIVES:-<no API response>}; $(tail -5 "${SF_PATH%/}/vms/omvtest_microvm/vmm.log" 2>/dev/null)"
+            fi
+            assert_rpc_fails "resizeDataDisk (VM running)" "MicroVm" "resizeDataDisk" \
+                "{\"uuid\":\"$DISK_UUID\",\"size_mib\":\"128\"}"
+            assert_rpc_fails "deleteDisk (VM running)" "MicroVm" "deleteDisk" \
+                "{\"uuid\":\"$DISK_UUID\",\"deletefile\":true}"
+
+            SNAP_OUT=$(omv-rpc -u admin "MicroVm" "createSnapshot" \
+                "{\"vmuuid\":\"$VM_UUID\",\"name\":\"omvtest-disk-snap\"}" 2>&1)
+            if wait_bg "$SNAP_OUT" 120 >/dev/null; then
+                DISK_SNAP_ID=$(find_snapshot_id omvtest-disk-snap || echo "")
+                if [ -n "$DISK_SNAP_ID" ] && [ -f "${SF_PATH%/}/vms/omvtest_microvm/snapshots/${DISK_SNAP_ID}/disk-omvtestdisk.img" ]; then
+                    _pass "Snapshot includes the data disk"
+                else
+                    _fail "Snapshot includes the data disk" "disk-omvtestdisk.img not in snapshot ${DISK_SNAP_ID}"
+                fi
+            else
+                _fail "Snapshot includes the data disk" "createSnapshot failed"
+            fi
+
+            omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+            wait_for_state stopped 30 || true
+        else
+            _skip "doCommand start (with data disk)" "no real image"
+            _skip "VM with a data disk reaches 'running' state" "no real image"
+            _skip "Data disk is attached to the running VM" "no real image"
+            _skip "resizeDataDisk (VM running)" "no real image"
+            _skip "deleteDisk (VM running)" "no real image"
+            _skip "Snapshot includes the data disk" "no real image"
+        fi
+
+        assert_rpc "deleteDisk (keep file)" "MicroVm" "deleteDisk" \
+            "{\"uuid\":\"$DISK_UUID\",\"deletefile\":\"false\"}"
+        DISK_UUID=""
+        if [ -f "$DISK_FILE" ]; then
+            _pass "Kept disk image survives deleteDisk"
+        else
+            _fail "Kept disk image survives deleteDisk" "file gone: $DISK_FILE"
+        fi
+
+        assert_rpc "setDisk (reattach kept image)" "MicroVm" "setDisk" \
+            "$(disk_params "$OMV_NEW_UUID" omvtestdisk)" '"size_mib": *96'
+        DISK_UUID=$(json_uuid "$RPC_OUT")
+
+        if [ -n "$DISK_UUID" ]; then
+            assert_rpc "deleteDisk (delete file)" "MicroVm" "deleteDisk" \
+                "{\"uuid\":\"$DISK_UUID\",\"deletefile\":true}"
+            DISK_UUID=""
+            if [ ! -e "$DISK_FILE" ]; then
+                _pass "deleteDisk removes the disk image"
+            else
+                _fail "deleteDisk removes the disk image" "still present: $DISK_FILE"
+            fi
+        else
+            _skip "deleteDisk (delete file)" "reattach failed"
+            _skip "deleteDisk removes the disk image" "reattach failed"
+        fi
+    fi
+else
+    _skip "Data disk lifecycle" "no vm uuid or shared folder"
 fi
 
 # ---------------------------------------------------------------------------
