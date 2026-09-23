@@ -6,11 +6,7 @@ set -e
 . /usr/share/openmediavault/scripts/helper-functions
 
 remove_action() {
-    # Stop and disable any running VM instances of the systemd template unit.
-    for unit in $(systemctl list-units --all --no-legend --plain 'omv-microvm@*.service' 2>/dev/null | awk '{print $1}'); do
-        systemctl stop "${unit}" 2>/dev/null || true
-        systemctl disable "${unit}" 2>/dev/null || true
-    done
+    # VM instances were already stopped and disabled by prerm.
     rm -f /etc/systemd/system/omv-microvm@.service
     rm -f /etc/logrotate.d/openmediavault-microvm
     systemctl daemon-reload 2>/dev/null || true

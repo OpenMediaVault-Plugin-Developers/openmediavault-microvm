@@ -1,0 +1,28 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+    remove)
+        # Stop and disable any running VM instances of the systemd template
+        # unit here rather than in postrm: their ExecStopPost
+        # (omv-microvm-stop-cleanup, which also unmounts a jailed VM's
+        # chroot) must still be installed when they stop. Not on upgrade —
+        # running VMs are left alone and pick up the new scripts on their
+        # next start.
+        for unit in $(systemctl list-units --all --no-legend --plain 'omv-microvm@*.service' 2>/dev/null | awk '{print $1}'); do
+            systemctl stop "${unit}" 2>/dev/null || true
+            systemctl disable "${unit}" 2>/dev/null || true
+        done
+    ;;
+
+    upgrade|deconfigure|failed-upgrade)
+    ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0
