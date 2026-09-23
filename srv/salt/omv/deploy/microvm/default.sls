@@ -31,12 +31,13 @@ microvm_install_cterm:
 {% endif %}
 
 # Firecracker has no Debian package — omv-install-fc fetches the pinned
-# static binary release from GitHub the first time, or whenever the
-# installed version differs. It is idempotent, so this just re-runs it.
+# static binary release (firecracker + jailer) from GitHub the first time,
+# or whenever either installed version differs. It is idempotent, so this
+# just re-runs it.
 install_firecracker_binary:
   cmd.run:
     - name: omv-install-fc {{ fc_version }}
-    - unless: /usr/local/bin/firecracker --version 2>/dev/null | grep -q "v{{ fc_version }}"
+    - unless: /usr/local/bin/firecracker --version 2>/dev/null | grep -q "v{{ fc_version }}" && /usr/local/bin/jailer --version 2>/dev/null | grep -q "v{{ fc_version }}"
 
 configure_microvm_template_unit:
   file.managed:

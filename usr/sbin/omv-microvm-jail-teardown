@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-jail-teardown — unmount and remove a VM's jailer chroot.
+#
+# Every mount under the chroot is removed first, and the directory is only
+# deleted once none are left: the snapshot staging and restore directories
+# are bind-mounted in, and rm -rf across one of those would delete the real
+# directory's contents. A no-op for a VM that has no chroot.
+#
+# Usage: omv-microvm-jail-teardown <vm-name>
+
+set -uo pipefail
+
+VMNAME="${1:?usage: omv-microvm-jail-teardown <vm-name>}"
+
+# Must match the derivation in omv-microvm-run.
+JAIL_BASE="/var/lib/openmediavault-microvm/jail"
+JAIL_ID="mvm-$(echo -n "$VMNAME" | md5sum | cut -c1-16)"
+JAIL_DIR="${JAIL_BASE}/firecracker/${JAIL_ID}"
+
+[ -d "$JAIL_DIR" ] || exit 0
+
+_jail_mounts() {
+    # Deepest first, so a mount is never hidden under another.
+    findmnt -rn -o TARGET | awk -v p="${JAIL_DIR}/" 'index($0, p) == 1' | sort -r
+}
+
+for _ in 1 2 3; do
+    MOUNTS=$(_jail_mounts)
+    [ -n "$MOUNTS" ] || break
+    while read -r m; do
+        umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null || true
+    done <<< "$MOUNTS"
+done
+
+if [ -n "$(_jail_mounts)" ]; then
+    echo "ERROR: still mounted under ${JAIL_DIR}, leaving it in place:" >&2
+    _jail_mounts >&2
+    exit 1
+fi
+
+rm -rf --one-file-system "$JAIL_DIR"
+exit 0

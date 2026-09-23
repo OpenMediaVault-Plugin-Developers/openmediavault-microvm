@@ -926,6 +926,156 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6c. Jailer
+# ---------------------------------------------------------------------------
+section "Jailer"
+
+vm_params() {
+    # vm_params <jailer True|False|omit>
+    python3 -c "
+import json
+d = {
+    'uuid': '$VM_UUID', 'name': 'omvtest_microvm', 'enable': True, 'autostart': False,
+    'vcpus': 2, 'memory_mib': 1024, 'imageref': '$TEST_IMAGE_REF',
+    'networkref': '$TEST_NETWORK_NAME', 'macaddr': '',
+    'bootargs': 'console=ttyS0 reboot=k panic=1 pci=off', 'notes': 'RPC test VM - updated'
+}
+if '$1' != 'omit':
+    d['jailer'] = $1
+print(json.dumps(d))"
+}
+
+vm_field() {
+    omv-rpc -u admin "MicroVm" "getVm" "{\"uuid\":\"$VM_UUID\"}" 2>/dev/null \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''))" 2>/dev/null
+}
+
+# Must match the derivation in omv-microvm-run.
+JAIL_DIR="/var/lib/openmediavault-microvm/jail/firecracker/mvm-$(echo -n omvtest_microvm | md5sum | cut -c1-16)"
+
+if [ -n "$VM_UUID" ]; then
+    omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+    wait_for_state stopped 30 || true
+
+    assert_rpc "setVm (enable jailer)" "MicroVm" "setVm" "$(vm_params True)"
+    JAIL_UID=$(vm_field jail_uid)
+    if [ "${JAIL_UID:-0}" -ge 1500000000 ] 2>/dev/null; then
+        _pass "Jail uid allocated ($JAIL_UID)"
+    else
+        _fail "Jail uid allocated" "jail_uid=${JAIL_UID}"
+    fi
+    assert_rpc "setVm (jailer omitted keeps it on)" "MicroVm" "setVm" "$(vm_params omit)"
+    if [ "$(vm_field jailer)" = "True" ] && [ "$(vm_field jail_uid)" = "$JAIL_UID" ]; then
+        _pass "Jailer setting and uid survive an update without them"
+    else
+        _fail "Jailer setting and uid survive an update without them" \
+            "jailer=$(vm_field jailer) jail_uid=$(vm_field jail_uid)"
+    fi
+
+    if [ -n "$REAL_IMAGE_REF" ]; then
+        assert_rpc "doCommand start (jailed)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
+        if wait_for_state running 60; then
+            _pass "Jailed VM reaches 'running' state"
+        else
+            _fail "Jailed VM reaches 'running' state" "state=$(vm_state) after waiting"
+        fi
+
+        # Same race as the data disk check: wait for the live VMM.
+        FC_SOCKET="/run/openmediavault-microvm/omvtest_microvm/firecracker.socket"
+        FC_ROOT_DRIVE=""
+        for _ in $(seq 1 30); do
+            if [ -S "$FC_SOCKET" ]; then
+                FC_ROOT_DRIVE=$(curl -sS --unix-socket "$FC_SOCKET" 'http://localhost/vm/config' 2>/dev/null \
+                    | jq -r '.drives[]? | select(.drive_id == "rootfs") | .path_on_host' 2>/dev/null)
+                [ -n "$FC_ROOT_DRIVE" ] && break
+            fi
+            sleep 1
+        done
+        if [ "$FC_ROOT_DRIVE" = "/rootfs.ext4" ]; then
+            _pass "API socket works through the jail and sees chroot paths"
+        else
+            _fail "API socket works through the jail and sees chroot paths" \
+                "rootfs drive=${FC_ROOT_DRIVE:-<no API response>}; $(tail -5 "${SF_PATH%/}/vms/omvtest_microvm/vmm.log" 2>/dev/null)"
+        fi
+        if pgrep -u "$JAIL_UID" -x firecracker >/dev/null; then
+            _pass "Firecracker runs as the jail uid"
+        else
+            _fail "Firecracker runs as the jail uid" "no firecracker process with uid $JAIL_UID"
+        fi
+
+        assert_rpc_fails "setVm (switch jailer off while running)" "MicroVm" "setVm" "$(vm_params False)"
+
+        SNAP_OUT=$(omv-rpc -u admin "MicroVm" "createSnapshot" \
+            "{\"vmuuid\":\"$VM_UUID\",\"name\":\"omvtest-jail-snap\"}" 2>&1)
+        JAIL_SNAP_ID=""
+        if BG_RESULT=$(wait_bg "$SNAP_OUT" 120); then
+            JAIL_SNAP_ID=$(find_snapshot_id omvtest-jail-snap || echo "")
+        fi
+        JAIL_SNAP_DIR="${SF_PATH%/}/vms/omvtest_microvm/snapshots/${JAIL_SNAP_ID}"
+        if [ -n "$JAIL_SNAP_ID" ] && [ -f "${JAIL_SNAP_DIR}/jailed" ] \
+            && [ "$(stat -c%u "${JAIL_SNAP_DIR}/memfile" 2>/dev/null)" = "0" ]; then
+            _pass "Warm snapshot of a jailed VM (marked jailed, memfile owned by root)"
+        else
+            _fail "Warm snapshot of a jailed VM (marked jailed, memfile owned by root)" \
+                "id=${JAIL_SNAP_ID}; $(ls -ln "$JAIL_SNAP_DIR" 2>&1 | tail -5)"
+        fi
+
+        if [ -n "$JAIL_SNAP_ID" ]; then
+            RESTORE_OUT=$(omv-rpc -u admin "MicroVm" "restoreSnapshot" \
+                "{\"vmuuid\":\"$VM_UUID\",\"snapshotid\":\"$JAIL_SNAP_ID\"}" 2>&1)
+            if BG_RESULT=$(wait_bg "$RESTORE_OUT" 120) && wait_for_state running 60; then
+                _pass "restoreSnapshot (warm, jailed)"
+            else
+                _fail "restoreSnapshot (warm, jailed)" "state=$(vm_state); $(echo "$BG_RESULT" | tail -5)"
+            fi
+        else
+            _skip "restoreSnapshot (warm, jailed)" "no jailed snapshot"
+        fi
+
+        omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+        wait_for_state stopped 30 || true
+        if [ ! -e "$JAIL_DIR" ] && ! findmnt -rn -o TARGET | grep -qF "$JAIL_DIR"; then
+            _pass "Stopping removes the jail chroot and its mounts"
+        else
+            _fail "Stopping removes the jail chroot and its mounts" "$(findmnt -rn -o TARGET | grep -F "$JAIL_DIR")"
+        fi
+    else
+        for t in "doCommand start (jailed)" "Jailed VM reaches 'running' state" \
+            "API socket works through the jail and sees chroot paths" "Firecracker runs as the jail uid" \
+            "setVm (switch jailer off while running)" \
+            "Warm snapshot of a jailed VM (marked jailed, memfile owned by root)" \
+            "restoreSnapshot (warm, jailed)" "Stopping removes the jail chroot and its mounts"; do
+            _skip "$t" "no real image"
+        done
+    fi
+
+    # Leaves the VM unjailed and stopped for the sections below.
+    assert_rpc "setVm (disable jailer)" "MicroVm" "setVm" "$(vm_params False)"
+    if [ "$(vm_field jail_uid)" = "$JAIL_UID" ]; then
+        _pass "Jail uid is kept when the jailer is switched off"
+    else
+        _fail "Jail uid is kept when the jailer is switched off" "jail_uid=$(vm_field jail_uid)"
+    fi
+
+    if [ -n "$REAL_IMAGE_REF" ] && [ -n "${JAIL_SNAP_ID:-}" ]; then
+        RESTORE_OUT=$(omv-rpc -u admin "MicroVm" "restoreSnapshot" \
+            "{\"vmuuid\":\"$VM_UUID\",\"snapshotid\":\"$JAIL_SNAP_ID\"}" 2>&1)
+        if wait_bg "$RESTORE_OUT" 120 >/dev/null; then
+            _fail "restoreSnapshot (jailed snapshot, jailer now off) rejected" "restore succeeded"
+            omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+            wait_for_state stopped 30 || true
+        else
+            _pass "restoreSnapshot (jailed snapshot, jailer now off) rejected"
+        fi
+    else
+        _skip "restoreSnapshot (jailed snapshot, jailer now off) rejected" "no real image or jailed snapshot"
+    fi
+else
+    _skip "Jailer" "no vm uuid"
+fi
+
+# ---------------------------------------------------------------------------
 # 7. Backups
 # ---------------------------------------------------------------------------
 section "Backups"

@@ -43,6 +43,9 @@ IMAGE_REF=$(omv_config_get "${VM_XPATH}/imageref")
 NETWORKREF=$(omv_config_get "${VM_XPATH}/networkref")
 MACADDR=$(omv_config_get "${VM_XPATH}/macaddr")
 BOOTARGS=$(omv_config_get "${VM_XPATH}/bootargs")
+USE_JAILER=0
+omv_checkyesno "$(omv_config_get "${VM_XPATH}/jailer")" && USE_JAILER=1
+JAIL_UID=$(omv_config_get "${VM_XPATH}/jail_uid")
 
 [ -n "$IMAGE_REF" ] || die "No image configured."
 [ -n "$NETWORKREF" ] || die "No network configured."
@@ -107,9 +110,27 @@ DTACH_SOCK="${RUN_DIR}/console.dtach"
 CONSOLE_LOG="${VM_DIR}/console.log"
 VMM_LOG="${VM_DIR}/vmm.log"
 CONFIG_PATH="${VM_DIR}/vm_config.json"
-rm -f "$SOCKET_PATH"
+rm -f "$SOCKET_PATH" "${RUN_DIR}/jailed"
 : > "$CONSOLE_LOG"
 : > "$VMM_LOG"
+
+# Jailer chroot: <base>/<exec-file-name>/<id>/root, laid out by the
+# jailer itself. The id only allows [a-zA-Z0-9-], hence a hash rather than
+# the VM name. Must match omv-microvm-jail-teardown. /var/lib rather than
+# /run: the jailer mknods /dev/kvm etc. inside it, which a nodev mount
+# (like /run) would make unusable.
+JAIL_BASE="/var/lib/openmediavault-microvm/jail"
+JAIL_ID="mvm-$(echo -n "$VMNAME" | md5sum | cut -c1-16)"
+JAIL_ROOT="${JAIL_BASE}/firecracker/${JAIL_ID}/root"
+# Where a jailed VM's warm snapshots are written (bind-mounted into the
+# chroot as /snapshot-out), before omv-microvm-snapshot-create moves them
+# to their real destination. On the VM's own storage so that move is
+# usually a rename, not a copy of the whole memory dump.
+JAIL_STAGE="${VM_DIR}/.jail-snapshot"
+
+# Leftovers from a run that wasn't cleaned up (host crash), or from before
+# the jailer setting was switched off.
+omv-microvm-jail-teardown "$VMNAME" || die "Could not clean up the previous jailer chroot."
 
 # Deterministic short name (IFNAMSIZ=15) so omv-microvm-stop-cleanup can
 # find and remove the same device.
@@ -146,7 +167,14 @@ else
     [ -n "$BRIDGE" ] || die "Network '${NETWORKREF}' has no bridge device configured."
 fi
 
-if ! ip link show "$TAP_NAME" >/dev/null 2>&1; then
+if [ "$USE_JAILER" -eq 1 ]; then
+    # Owned by the jail user so unprivileged Firecracker may attach to it;
+    # an existing device's owner can't be changed, so always recreate it.
+    if ip link show "$TAP_NAME" >/dev/null 2>&1; then
+        ip link del "$TAP_NAME"
+    fi
+    ip tuntap add dev "$TAP_NAME" mode tap user "$JAIL_UID" group "$JAIL_UID"
+elif ! ip link show "$TAP_NAME" >/dev/null 2>&1; then
     ip tuntap add dev "$TAP_NAME" mode tap
 fi
 ip link set "$TAP_NAME" master "$BRIDGE"
@@ -157,18 +185,95 @@ if [ -n "$MACADDR" ]; then
     NETIF_JSON="{\"iface_id\":\"eth0\",\"host_dev_name\":\"${TAP_NAME}\",\"guest_mac\":\"${MACADDR}\"}"
 fi
 
+DISK_ROWS=$(omv-microvm-list-disks "$VMNAME") || die "Could not list data disks."
+
+# The paths Firecracker itself is given — inside the chroot when jailed.
+FC_KERNEL_PATH="$KERNEL_PATH"
+FC_ROOTFS_PATH="$ROOTFS_PATH"
+FC_CONFIG_PATH="$CONFIG_PATH"
+FC_SOCKET_PATH="$SOCKET_PATH"
+FC_VMM_LOG="$VMM_LOG"
+fc_disk_path() {
+    if [ "$USE_JAILER" -eq 1 ]; then
+        echo "/disks/${1}.img"
+    else
+        echo "$2"
+    fi
+}
+
+if [ "$USE_JAILER" -eq 1 ]; then
+    [ -x /usr/local/bin/jailer ] || die "Jailer binary missing: /usr/local/bin/jailer"
+    [ "${JAIL_UID:-0}" -gt 0 ] 2>/dev/null || die "No jail user id allocated; save the VM's settings again."
+
+    # Bind mounts rather than hard links, which can't cross filesystems
+    # (the chroot is on the root fs, disks are on shared folders).
+    # ExecStopPost's omv-microvm-jail-teardown undoes all of them, also
+    # when this script fails partway.
+    _jail_bind() {
+        # _jail_bind <host-path> <path-in-chroot> <readonly 0|1>
+        local target="${JAIL_ROOT}${2}"
+        chown "${JAIL_UID}:${JAIL_UID}" "$1" || die "Could not hand ${1} to the jail user."
+        mkdir -p "$(dirname "$target")"
+        touch "$target"
+        mount --bind "$1" "$target" || die "Could not bind-mount ${1} into the jail."
+        if [ "$3" -eq 1 ]; then
+            mount -o remount,bind,ro "$target" || die "Could not make ${2} read-only in the jail."
+        fi
+    }
+
+    mkdir -p "${JAIL_ROOT}/run"
+    chown "${JAIL_UID}:${JAIL_UID}" "${JAIL_ROOT}/run"
+
+    _jail_bind "$KERNEL_PATH" /vmlinux 1
+    _jail_bind "$ROOTFS_PATH" /rootfs.ext4 0
+    _jail_bind "$VMM_LOG" /vmm.log 0
+    while IFS=$'\t' read -r disk_name disk_path disk_readonly _ _; do
+        [ -n "$disk_name" ] || continue
+        [ -f "$disk_path" ] || die "Data disk '${disk_name}' missing: ${disk_path}"
+        _jail_bind "$disk_path" "$(fc_disk_path "$disk_name" "$disk_path")" "$disk_readonly"
+    done <<< "$DISK_ROWS"
+
+    rm -rf "$JAIL_STAGE"
+    mkdir -m 0700 "$JAIL_STAGE"
+    chown "${JAIL_UID}:${JAIL_UID}" "$JAIL_STAGE"
+    mkdir -p "${JAIL_ROOT}/snapshot-out"
+    mount --bind "$JAIL_STAGE" "${JAIL_ROOT}/snapshot-out" || die "Could not bind-mount the snapshot staging directory into the jail."
+
+    if [ "$RESTORE_MODE" -eq 1 ]; then
+        # The restore hook loads it from /snapshot-in. Handed back to root
+        # by the hook once loaded.
+        RESTORE_SRC=$(cat "$RESTORE_MARKER")
+        chown "${JAIL_UID}:${JAIL_UID}" "${RESTORE_SRC}/memfile" "${RESTORE_SRC}/vmstate" \
+            || die "Could not hand the snapshot to the jail user."
+        mkdir -p "${JAIL_ROOT}/snapshot-in"
+        mount --bind "$RESTORE_SRC" "${JAIL_ROOT}/snapshot-in" || die "Could not bind-mount the snapshot into the jail."
+        mount -o remount,bind,ro "${JAIL_ROOT}/snapshot-in"
+    fi
+
+    FC_KERNEL_PATH="/vmlinux"
+    FC_ROOTFS_PATH="/rootfs.ext4"
+    FC_CONFIG_PATH="/vm_config.json"
+    FC_SOCKET_PATH="/run/firecracker.socket"
+    FC_VMM_LOG="/vmm.log"
+
+    # Everything else (snapshot, restore hook, cleanup) keeps using the
+    # usual socket path; the marker tells them the VM is jailed.
+    ln -sfn "${JAIL_ROOT}${FC_SOCKET_PATH}" "$SOCKET_PATH"
+    printf '%s' "$JAIL_ROOT" > "${RUN_DIR}/jailed"
+    _log "Jailed as uid ${JAIL_UID} in ${JAIL_ROOT}."
+fi
+
 if [ "$RESTORE_MODE" -eq 0 ]; then
     # Data disks follow the rootfs in name order, so the guest sees them as
     # /dev/vdb, /dev/vdc, ... — ext4 ones are also labelled with the disk
     # name, which is the stabler thing to mount by.
     DATA_DRIVES_JSON="[]"
-    DISK_ROWS=$(omv-microvm-list-disks "$VMNAME") || die "Could not list data disks."
     while IFS=$'\t' read -r disk_name disk_path disk_readonly _ _; do
         [ -n "$disk_name" ] || continue
         [ -f "$disk_path" ] || die "Data disk '${disk_name}' missing: ${disk_path}"
         DATA_DRIVES_JSON=$(jq -c \
             --arg id "$disk_name" \
-            --arg path "$disk_path" \
+            --arg path "$(fc_disk_path "$disk_name" "$disk_path")" \
             --argjson ro "$([ "$disk_readonly" -eq 1 ] && echo true || echo false)" \
             '. + [{"drive_id": $id, "path_on_host": $path, "is_root_device": false, "is_read_only": $ro}]' \
             <<< "$DATA_DRIVES_JSON")
@@ -176,9 +281,9 @@ if [ "$RESTORE_MODE" -eq 0 ]; then
     done <<< "$DISK_ROWS"
 
     jq -n \
-        --arg kernel "$KERNEL_PATH" \
+        --arg kernel "$FC_KERNEL_PATH" \
         --arg bootargs "$BOOTARGS" \
-        --arg rootfs "$ROOTFS_PATH" \
+        --arg rootfs "$FC_ROOTFS_PATH" \
         --argjson vcpus "$VCPUS" \
         --argjson mem "$MEMORY_MIB" \
         --argjson netif "$NETIF_JSON" \
@@ -200,20 +305,29 @@ if [ "$RESTORE_MODE" -eq 0 ]; then
                 "mem_size_mib": $mem
             }
         }' > "$CONFIG_PATH"
+
+    if [ "$USE_JAILER" -eq 1 ]; then
+        install -o "$JAIL_UID" -g "$JAIL_UID" -m 0600 "$CONFIG_PATH" "${JAIL_ROOT}${FC_CONFIG_PATH}"
+    fi
 fi
 
-_log "Starting Firecracker (vcpus=${VCPUS} mem=${MEMORY_MIB}MiB bridge=${BRIDGE} tap=${TAP_NAME} restore=${RESTORE_MODE}) ..."
+FC_ARGS="--api-sock '${FC_SOCKET_PATH}' --log-path '${FC_VMM_LOG}' --level Info"
+if [ "$RESTORE_MODE" -eq 0 ]; then
+    FC_ARGS="${FC_ARGS} --config-file '${FC_CONFIG_PATH}'"
+fi
+if [ "$USE_JAILER" -eq 1 ]; then
+    # No --daemonize/--new-pid-ns: the jailer must exec Firecracker in
+    # place, so it stays attached to the console pty below and in this
+    # unit's cgroup.
+    FC_CMD="/usr/local/bin/jailer --id '${JAIL_ID}' --exec-file /usr/local/bin/firecracker --uid ${JAIL_UID} --gid ${JAIL_UID} --chroot-base-dir '${JAIL_BASE}' -- ${FC_ARGS}"
+else
+    FC_CMD="/usr/local/bin/firecracker ${FC_ARGS}"
+fi
+
+_log "Starting Firecracker (vcpus=${VCPUS} mem=${MEMORY_MIB}MiB bridge=${BRIDGE} tap=${TAP_NAME} restore=${RESTORE_MODE} jailer=${USE_JAILER}) ..."
 
 # dtach lets omv-microvm-console attach to the live console later; script
 # records the session to console.log regardless of whether anyone's
 # attached. KillMode=control-group handles shutdown for the whole chain.
 STARTED=1
-if [ "$RESTORE_MODE" -eq 1 ]; then
-    exec dtach -N "$DTACH_SOCK" \
-        script -qfc "/usr/local/bin/firecracker --api-sock '${SOCKET_PATH}' --log-path '${VMM_LOG}' --level Info" \
-        "$CONSOLE_LOG"
-else
-    exec dtach -N "$DTACH_SOCK" \
-        script -qfc "/usr/local/bin/firecracker --api-sock '${SOCKET_PATH}' --config-file '${CONFIG_PATH}' --log-path '${VMM_LOG}' --level Info" \
-        "$CONSOLE_LOG"
-fi
+exec dtach -N "$DTACH_SOCK" script -qfc "$FC_CMD" "$CONSOLE_LOG"

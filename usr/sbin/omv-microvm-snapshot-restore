@@ -37,6 +37,22 @@ if [ -f "${SNAPSHOT_DIR}/vmstate" ] && [ -f "${SNAPSHOT_DIR}/memfile" ]; then
     WARM=1
 fi
 
+# A warm snapshot's device state holds the drive paths Firecracker saw:
+# chroot paths when jailed, host paths otherwise. So it only loads with the
+# jailer setting it was taken with.
+if [ "$WARM" -eq 1 ]; then
+    SNAP_JAILED=0
+    [ -f "${SNAPSHOT_DIR}/jailed" ] && SNAP_JAILED=1
+    VM_JAILED=0
+    omv_checkyesno "$(omv_config_get "/config/services/microvm/vms/vm[name='${VMNAME}']/jailer")" && VM_JAILED=1
+    if [ "$SNAP_JAILED" -ne "$VM_JAILED" ]; then
+        if [ "$SNAP_JAILED" -eq 1 ]; then
+            die "This snapshot was taken while the VM ran in the jailer, which is now turned off for it. Turn \"Run in jailer\" back on to restore it."
+        fi
+        die "This snapshot was taken while the VM ran without the jailer, which is now turned on for it. Turn \"Run in jailer\" off to restore it."
+    fi
+fi
+
 # Checked before anything is overwritten. Saved data disks go back to
 # wherever that disk lives now. A warm snapshot's device state has the
 # disk's path baked in, so one whose disk has since been removed can't be

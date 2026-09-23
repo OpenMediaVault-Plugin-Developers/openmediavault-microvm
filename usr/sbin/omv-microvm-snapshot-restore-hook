@@ -48,9 +48,25 @@ for _ in $(seq 1 50); do
 done
 [ -S "$SOCKET_PATH" ] || die "API socket never appeared: ${SOCKET_PATH}"
 
+# A jailed VM sees the snapshot at /snapshot-in (bind-mounted by
+# omv-microvm-run, which also handed its files to the jail user).
+JAILED=0
+FC_SNAPSHOT_DIR="$SNAPSHOT_DIR"
+if [ -f "${RUN_DIR}/jailed" ]; then
+    JAILED=1
+    FC_SNAPSHOT_DIR="/snapshot-in"
+fi
+# Firecracker keeps the files open once loaded, so they can go back to root
+# right away, whether the load worked or not.
+_restore_owner() {
+    if [ "$JAILED" -eq 1 ]; then
+        chown root:root "${SNAPSHOT_DIR}/memfile" "${SNAPSHOT_DIR}/vmstate" || true
+    fi
+}
+
 BODY=$(jq -n \
-    --arg mem "${SNAPSHOT_DIR}/memfile" \
-    --arg state "${SNAPSHOT_DIR}/vmstate" \
+    --arg mem "${FC_SNAPSHOT_DIR}/memfile" \
+    --arg state "${FC_SNAPSHOT_DIR}/vmstate" \
     '{
         "mem_backend": {"backend_type": "File", "backend_path": $mem},
         "snapshot_path": $state,
@@ -60,7 +76,8 @@ BODY=$(jq -n \
 resp=$(mktemp)
 http_code=$(curl -sS --unix-socket "$SOCKET_PATH" -o "$resp" -w '%{http_code}' \
     -X PUT 'http://localhost/snapshot/load' \
-    -H 'Content-Type: application/json' -d "$BODY") || { rm -f "$resp"; die "Firecracker API request failed: PUT /snapshot/load"; }
+    -H 'Content-Type: application/json' -d "$BODY") || { rm -f "$resp"; _restore_owner; die "Firecracker API request failed: PUT /snapshot/load"; }
+_restore_owner
 
 if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
     _log "Firecracker API error (${http_code}): $(cat "$resp")"

@@ -20,6 +20,11 @@
 
 class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
 {
+    // Jailed VMs each get their own uid/gid, allocated upwards from here —
+    // high enough to stay clear of regular users, systemd's dynamic users
+    // and the usual container subuid ranges. They need no passwd entries.
+    const JAIL_UID_BASE = 1500000000;
+
     public function getName()
     {
         return "MicroVm";
@@ -538,9 +543,24 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $isNew = $object->isNew();
         if (TRUE === $isNew) {
             $db->assertIsUnique($object, "name");
+            $object->set('jail_uid', 0);
         } else {
-            // Enforce server-side too, against direct RPC/API use.
             $existing = $db->get("conf.service.microvm.vm", $object->get('uuid'));
+            // Allocated once, never taken from the client.
+            $object->set('jail_uid', $existing->get('jail_uid'));
+            // Optional for API callers that predate the setting.
+            if (!array_key_exists('jailer', $params)) {
+                $object->set('jailer', $existing->get('jailer'));
+            }
+            if (boolval($existing->get('jailer')) !== boolval($object->get('jailer'))) {
+                $state = $this->getActiveState($existing->get('name'));
+                if (!in_array($state, ['stopped', 'error'], true)) {
+                    throw new \OMV\Exception(sprintf(
+                        gettext("VM '%s' is %s; it must be stopped before the jailer setting can be changed."),
+                        $existing->get('name'), $state));
+                }
+            }
+            // Enforce server-side too, against direct RPC/API use.
             if ($existing->get('imageref') !== $object->get('imageref')) {
                 throw new \OMV\Exception(gettext(
                     "The image can only be set when a VM is created. Delete and recreate the VM to use a different image."
@@ -552,6 +572,9 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                 ));
             }
         }
+        if (boolval($object->get('jailer')) && 0 === (int) $object->get('jail_uid')) {
+            $object->set('jail_uid', $this->allocateJailUid());
+        }
         $db->set($object);
         // The VM's confdb record is read fresh by omv-microvm-run every time
         // the unit starts, so nothing needs to be rendered to disk here — an
@@ -559,6 +582,16 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         // the autostart flag.
         $this->applyChanges($context);
         return $object->getAssoc();
+    }
+
+    private function allocateJailUid()
+    {
+        $db = \OMV\Config\Database::getInstance();
+        $max = self::JAIL_UID_BASE - 1;
+        foreach ($db->get("conf.service.microvm.vm") as $vm) {
+            $max = max($max, (int) $vm->get('jail_uid'));
+        }
+        return $max + 1;
     }
 
     public function doCommand($params, $context)

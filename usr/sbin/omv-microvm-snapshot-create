@@ -8,6 +8,12 @@
 # "include in snapshots and backups" turned off — those are left out and
 # keep whatever contents they have at restore time.
 #
+# A jailed VM's Firecracker can only write inside its chroot, so its
+# memory/device state goes to the staging directory omv-microvm-run
+# bind-mounts in, and is moved here afterwards. Such a snapshot is marked
+# with a "jailed" file: its device state refers to chroot paths, so it can
+# only be loaded by a jailed VM again (see omv-microvm-snapshot-restore).
+#
 # Usage: omv-microvm-snapshot-create <vm-name> <snapshot-dir>
 
 set -eu
@@ -96,10 +102,21 @@ _log "Pausing VM ..."
 _fc_api PATCH /vm '{"state":"Paused"}'
 PAUSED=1
 
+# Must match omv-microvm-run.
+JAILED=0
+JAIL_STAGE="${VM_DIR}/.jail-snapshot"
+if [ -f "${RUN_DIR}/jailed" ]; then
+    JAILED=1
+    rm -f "${JAIL_STAGE}/memfile" "${JAIL_STAGE}/vmstate"
+    FC_SNAPSHOT_DIR="/snapshot-out"
+else
+    FC_SNAPSHOT_DIR="$SNAPSHOT_DIR"
+fi
+
 _log "Writing snapshot to ${SNAPSHOT_DIR} ..."
 _fc_api PUT /snapshot/create "$(jq -n \
-    --arg mem "${SNAPSHOT_DIR}/memfile" \
-    --arg state "${SNAPSHOT_DIR}/vmstate" \
+    --arg mem "${FC_SNAPSHOT_DIR}/memfile" \
+    --arg state "${FC_SNAPSHOT_DIR}/vmstate" \
     '{"mem_file_path": $mem, "snapshot_path": $state, "snapshot_type": "Full"}')"
 
 # Before resuming, so the disk copies stay consistent with the memory dump.
@@ -109,6 +126,17 @@ copy_disks
 _log "Resuming VM ..."
 _fc_api PATCH /vm '{"state":"Resumed"}'
 PAUSED=0
+
+# After resuming: when the destination is on another filesystem (a backup
+# target) this is a full copy of the memory dump, which the VM needn't sit
+# paused through.
+if [ "$JAILED" -eq 1 ]; then
+    _log "Moving memory/device state out of the jail ..."
+    mv "${JAIL_STAGE}/memfile" "${JAIL_STAGE}/vmstate" "${SNAPSHOT_DIR}/" \
+        || die "Could not move the snapshot out of the jail staging directory."
+    chown root:root "${SNAPSHOT_DIR}/memfile" "${SNAPSHOT_DIR}/vmstate"
+    touch "${SNAPSHOT_DIR}/jailed"
+fi
 
 _log "Snapshot complete."
 exit 0

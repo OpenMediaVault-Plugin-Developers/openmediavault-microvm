@@ -54,6 +54,12 @@ data:
         prop: snapshot_count
         flexGrow: 1
         sortable: true
+      - name: _("Jailer")
+        prop: jailer
+        flexGrow: 1
+        sortable: true
+        hidden: true
+        cellTemplateName: checkIcon
       - name: _("Network")
         prop: networkref
         flexGrow: 1

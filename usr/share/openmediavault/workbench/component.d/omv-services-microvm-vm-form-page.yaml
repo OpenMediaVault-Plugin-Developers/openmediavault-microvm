@@ -99,6 +99,13 @@ data:
         value: "console=ttyS0 reboot=k panic=1 pci=off"
         hint: _("Keep console=ttyS0 — removing it (or pointing it elsewhere) silences the guest's serial console. The VM will still boot and run fine, but the Console log and the cterm terminal will show nothing.")
       - type: divider
+        title: _("Security")
+      - type: checkbox
+        name: jailer
+        label: _("Run in jailer")
+        value: false
+        hint: _("Runs Firecracker through its jailer — chrooted, as its own unprivileged user, with only this VM's kernel, disks and network device inside. The VM's disk images are handed over to that user, so their owner changes to a numeric uid. Can only be changed while the VM is stopped. Warm snapshots and backups only restore with the setting they were taken with.")
+      - type: divider
         title: _("Notes")
       - type: textarea
         name: notes

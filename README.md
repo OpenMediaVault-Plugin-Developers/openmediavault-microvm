@@ -35,3 +35,16 @@ A disk image lives in the VM's own directory by default, or under
 `microvm-disks/<vm>/` on another shared folder if one is chosen. It is
 copied into snapshots and backups as `disk-<name>.img` unless "Include in
 snapshots and backups" is turned off.
+
+"Run in jailer" (per VM) starts Firecracker through its `jailer`: chrooted
+under `/var/lib/openmediavault-microvm/jail/firecracker/mvm-<hash>/root`,
+as a uid/gid of its own (allocated from 1500000000 up, no passwd entry)
+and with only that VM's kernel, disks and TAP device available. The files
+are bind-mounted into the chroot and chowned to the VM's uid, so on the
+shared folder they show up owned by that number; `omv-microvm-stop-cleanup`
+unmounts and removes the chroot again. The API socket path in
+`/run/openmediavault-microvm/<vm>/` becomes a symlink into the chroot, so
+tooling that talks to it works either way. A warm snapshot or backup
+records whether it was taken jailed (a `jailed` file next to `vmstate`)
+and only restores with the same setting, because its device state holds
+the paths Firecracker saw; cold ones restore either way.

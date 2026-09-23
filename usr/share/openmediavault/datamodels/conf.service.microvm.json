@@ -81,6 +81,15 @@
                 "type": "string",
                 "default": "console=ttyS0 reboot=k panic=1 pci=off"
               },
+              "jailer": {
+                "type": "boolean",
+                "default": false
+              },
+              "jail_uid": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
               "notes": {
                 "type": "string",
                 "default": ""
