@@ -78,6 +78,7 @@ data:
         name: dhcp
         label: _("Run DHCP for this network")
         value: true
+        hint: _("Runs a DHCP and DNS server on the network's gateway address. Each VM keeps the fixed address it is always given via its kernel command line; this also hands that same address, and the gateway as DNS server, to guests that run a DHCP client. VMs without a MAC address set get a fixed one derived from their name. Applies to VMs as they start.")
         modifiers:
           - type: disabled
             constraint:

@@ -49,11 +49,22 @@ configure_microvm_template_unit:
     - group: root
     - mode: '0644'
 
+configure_microvm_dhcp_template_unit:
+  file.managed:
+    - name: /etc/systemd/system/omv-microvm-dhcp@.service
+    - source:
+      - salt://{{ tpldir }}/files/omv-microvm-dhcp.service.j2
+    - template: jinja
+    - user: root
+    - group: root
+    - mode: '0644'
+
 microvm_systemd_reload:
   module.run:
     - name: service.systemctl_reload
     - onchanges:
       - file: configure_microvm_template_unit
+      - file: configure_microvm_dhcp_template_unit
 
 configure_microvm_logrotate:
   file.managed:

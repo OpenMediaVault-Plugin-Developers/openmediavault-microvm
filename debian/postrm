@@ -8,6 +8,7 @@ set -e
 remove_action() {
     # VM instances were already stopped and disabled by prerm.
     rm -f /etc/systemd/system/omv-microvm@.service
+    rm -f /etc/systemd/system/omv-microvm-dhcp@.service
     rm -f /etc/logrotate.d/openmediavault-microvm
     systemctl daemon-reload 2>/dev/null || true
     # Activate trigger to purge cached files.

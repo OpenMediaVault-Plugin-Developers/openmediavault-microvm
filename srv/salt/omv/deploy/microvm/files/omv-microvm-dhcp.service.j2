@@ -1,0 +1,11 @@
+[Unit]
+Description=OMV microVM NAT network DHCP/DNS (%i)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/omv-microvm-dhcp %i
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal

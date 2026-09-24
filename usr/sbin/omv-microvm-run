@@ -160,9 +160,33 @@ if [ "$NET_TYPE" = "nat" ]; then
     OFFSET=$(( (HASH % USABLE_HOSTS) + 2 ))
     GUEST_IP=$(_int_to_ip "$((NET_INT + OFFSET))")
 
-    BOOTARGS="${BOOTARGS} ip=${GUEST_IP}::${GATEWAY_IP}:${NETMASK}::eth0:off"
-    _log "Private NAT network '${NETWORKREF}': guest ${GUEST_IP}, gateway ${GATEWAY_IP}, bridge ${BRIDGE}."
+    # This VM's reservation, if it was on a DHCP network last time.
+    rm -f /run/openmediavault-microvm-dhcp/*/hosts/"${VMNAME}"
+
+    if omv_checkyesno "$(omv_config_get "${NETWORK_XPATH}/dhcp")"; then
+        # A reservation needs a MAC that stays the same across boots;
+        # without one set, the guest would pick a random one each time.
+        # Locally administered (02:), derived from the name like TAP_NAME.
+        if [ -z "$MACADDR" ]; then
+            MACADDR="02:fc:$(echo -n "$VMNAME" | md5sum | sed -E 's/^(..)(..)(..)(..).*/\1:\2:\3:\4/')"
+        fi
+        # Must match omv-microvm-dhcp. dnsmasq notices new files itself.
+        DHCP_HOSTS_DIR="/run/openmediavault-microvm-dhcp/${NETWORKREF}/hosts"
+        mkdir -p "$DHCP_HOSTS_DIR"
+        printf '%s,%s,infinite\n' "$MACADDR" "$GUEST_IP" > "${DHCP_HOSTS_DIR}/${VMNAME}"
+        # --no-block: this runs inside the VM unit's own start job. The
+        # guest's address doesn't wait on it anyway (see "ip=" below).
+        systemctl start --no-block "omv-microvm-dhcp@${NETWORKREF}.service" \
+            || _log "WARNING: could not start the DHCP server for network '${NETWORKREF}'."
+        # dns0: the gateway, where dnsmasq also answers DNS.
+        BOOTARGS="${BOOTARGS} ip=${GUEST_IP}::${GATEWAY_IP}:${NETMASK}::eth0:off:${GATEWAY_IP}"
+        _log "Private NAT network '${NETWORKREF}' (DHCP): guest ${GUEST_IP} (${MACADDR}), gateway/DNS ${GATEWAY_IP}, bridge ${BRIDGE}."
+    else
+        BOOTARGS="${BOOTARGS} ip=${GUEST_IP}::${GATEWAY_IP}:${NETMASK}::eth0:off"
+        _log "Private NAT network '${NETWORKREF}': guest ${GUEST_IP}, gateway ${GATEWAY_IP}, bridge ${BRIDGE}."
+    fi
 else
+    rm -f /run/openmediavault-microvm-dhcp/*/hosts/"${VMNAME}"
     BRIDGE=$(omv_config_get "${NETWORK_XPATH}/bridge")
     [ -n "$BRIDGE" ] || die "Network '${NETWORKREF}' has no bridge device configured."
 fi

@@ -88,6 +88,11 @@
         "jailer": {
           "type": "boolean"
         },
+        "shutdown_timeout": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
         "bootargs": {
           "type": "string"
         },

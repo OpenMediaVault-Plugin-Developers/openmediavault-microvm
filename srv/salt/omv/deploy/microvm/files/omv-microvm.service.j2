@@ -5,6 +5,10 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=/usr/sbin/omv-microvm-run %i
+# Asks the guest to shut down and waits up to the VM's shutdown timeout
+# (at most 300s, hence the margin below) before systemd's usual SIGTERM.
+ExecStop=/usr/sbin/omv-microvm-shutdown %i
+TimeoutStopSec=330
 ExecStopPost=/usr/sbin/omv-microvm-stop-cleanup %i
 ExecStartPost=/usr/sbin/omv-microvm-snapshot-restore-hook %i
 Restart=no

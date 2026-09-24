@@ -154,6 +154,7 @@ VM_UUID=""
 JOB_UUID=""
 NETWORK_UUID=""
 DISK_UUID=""
+NAT_NETWORK_UUID=""
 
 pre_cleanup() {
     local list='{"start":0,"limit":100,"sortfield":"name","sortdir":"ASC"}'
@@ -179,13 +180,13 @@ import sys, json
 d = json.load(sys.stdin)
 rows = d.get('data', d) if isinstance(d, dict) else d
 for r in rows:
-    if r.get('name') == 'omvtest_network':
+    if r.get('name') in ('omvtest_network', 'omvtest_natdhcp'):
         print(r['uuid'])
 " 2>/dev/null || echo "")
-    if [ -n "$existing_net" ]; then
-        info "Pre-cleanup: removing leftover test network ($existing_net)"
-        omv-rpc -u admin "MicroVm" "deleteNetwork" "{\"uuid\":\"$existing_net\"}" >/dev/null 2>&1 || true
-    fi
+    for net in $existing_net; do
+        info "Pre-cleanup: removing leftover test network ($net)"
+        omv-rpc -u admin "MicroVm" "deleteNetwork" "{\"uuid\":\"$net\"}" >/dev/null 2>&1 || true
+    done
 }
 
 cleanup() {
@@ -201,6 +202,10 @@ cleanup() {
     if [ -n "$VM_UUID" ]; then
         info "Deleting test VM $VM_UUID"
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"delete\"}" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$NAT_NETWORK_UUID" ]; then
+        info "Deleting test NAT network $NAT_NETWORK_UUID"
+        omv-rpc -u admin "MicroVm" "deleteNetwork" "{\"uuid\":\"$NAT_NETWORK_UUID\"}" >/dev/null 2>&1 || true
     fi
     if [ -n "$NETWORK_UUID" ]; then
         info "Deleting test network $NETWORK_UUID"
@@ -541,7 +546,7 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ] && [ "$(vm_state)" = "running" 
 
     assert_rpc "doCommand stop (before cold snapshot)" "MicroVm" "doCommand" \
         "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}"
-    if wait_for_state stopped 30; then
+    if wait_for_state stopped 60; then
         _pass "VM reaches 'stopped' state"
     else
         _fail "VM reaches 'stopped' state" "state=$(vm_state) after waiting"
@@ -605,6 +610,7 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ] && [ "$(vm_state)" = "running" 
             _fail "VM boots successfully after being restored" "state=$(vm_state) after waiting"
         fi
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+        wait_for_state stopped 60 || true
 
         assert_rpc "deleteSnapshot (cold, real)" "MicroVm" "deleteSnapshot" \
             "{\"vmuuid\":\"$VM_UUID\",\"snapshotid\":\"$COLD_ID\"}"
@@ -702,7 +708,7 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
     # Independent of whatever state the snapshot round trip above left the
     # VM in — resize always requires 'stopped'.
     omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
-    wait_for_state stopped 30 || true
+    wait_for_state stopped 60 || true
 
     RESIZE_ROOTFS="${SF_PATH%/}/vms/omvtest_microvm/rootfs.ext4"
     CURRENT_MIB=$(( $(stat -c%s "$RESIZE_ROOTFS" 2>/dev/null || echo 0) / 1048576 ))
@@ -719,7 +725,7 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
 
         assert_rpc "doCommand stop (before real resize)" "MicroVm" "doCommand" \
             "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}"
-        wait_for_state stopped 30 || true
+        wait_for_state stopped 60 || true
 
         NEW_MIB=$((CURRENT_MIB + 256))
         RESIZE_OUT=$(omv-rpc -u admin "MicroVm" "resizeDisk" \
@@ -786,7 +792,7 @@ assert_rpc_fails "setDisk (invalid name)" "MicroVm" "setDisk" \
 if [ -n "$VM_UUID" ] && [ -n "$SF_PATH" ]; then
     # Independent of whatever state earlier sections left the VM in.
     omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
-    wait_for_state stopped 30 || true
+    wait_for_state stopped 60 || true
 
     DISK_FILE="${SF_PATH%/}/vms/omvtest_microvm/disks/omvtestdisk.img"
     rm -f "$DISK_FILE"
@@ -884,7 +890,7 @@ if [ -n "$VM_UUID" ] && [ -n "$SF_PATH" ]; then
             fi
 
             omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
-            wait_for_state stopped 30 || true
+            wait_for_state stopped 60 || true
         else
             _skip "doCommand start (with data disk)" "no real image"
             _skip "VM with a data disk reaches 'running' state" "no real image"
@@ -955,7 +961,7 @@ JAIL_DIR="/var/lib/openmediavault-microvm/jail/firecracker/mvm-$(echo -n omvtest
 
 if [ -n "$VM_UUID" ]; then
     omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
-    wait_for_state stopped 30 || true
+    wait_for_state stopped 60 || true
 
     assert_rpc "setVm (enable jailer)" "MicroVm" "setVm" "$(vm_params True)"
     JAIL_UID=$(vm_field jail_uid)
@@ -1034,7 +1040,7 @@ if [ -n "$VM_UUID" ]; then
         fi
 
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
-        wait_for_state stopped 30 || true
+        wait_for_state stopped 60 || true
         if [ ! -e "$JAIL_DIR" ] && ! findmnt -rn -o TARGET | grep -qF "$JAIL_DIR"; then
             _pass "Stopping removes the jail chroot and its mounts"
         else
@@ -1064,7 +1070,7 @@ if [ -n "$VM_UUID" ]; then
         if wait_bg "$RESTORE_OUT" 120 >/dev/null; then
             _fail "restoreSnapshot (jailed snapshot, jailer now off) rejected" "restore succeeded"
             omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
-            wait_for_state stopped 30 || true
+            wait_for_state stopped 60 || true
         else
             _pass "restoreSnapshot (jailed snapshot, jailer now off) rejected"
         fi
@@ -1073,6 +1079,276 @@ if [ -n "$VM_UUID" ]; then
     fi
 else
     _skip "Jailer" "no vm uuid"
+fi
+
+# ---------------------------------------------------------------------------
+# 6d. NAT network DHCP
+# ---------------------------------------------------------------------------
+section "NAT network DHCP"
+
+TEST_NAT_NETWORK_NAME="omvtest_natdhcp"
+# Override if this happens to overlap a host network.
+TEST_NAT_SUBNET="${OMVTEST_NAT_SUBNET:-172.31.254.0/24}"
+TEST_NAT_GATEWAY="${TEST_NAT_SUBNET%.*/*}.1"
+DHCP_UNIT="omv-microvm-dhcp@${TEST_NAT_NETWORK_NAME}.service"
+# Must match omv-microvm-run / omv-microvm-dhcp / omv-microvm-ensure-nat-network.
+DHCP_DIR="/run/openmediavault-microvm-dhcp/${TEST_NAT_NETWORK_NAME}"
+TEST_NAT_BRIDGE="mvm-nat-$(echo -n "$TEST_NAT_NETWORK_NAME" | md5sum | cut -c1-7)"
+EXPECTED_MAC="02:fc:$(echo -n omvtest_microvm | md5sum | sed -E 's/^(..)(..)(..)(..).*/\1:\2:\3:\4/')"
+
+# vm_set <key> <json-value>: getVm, change one field, setVm.
+vm_set() {
+    local cur
+    cur=$(omv-rpc -u admin "MicroVm" "getVm" "{\"uuid\":\"$VM_UUID\"}" 2>/dev/null)
+    python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+d['$1'] = json.loads(sys.argv[2])
+print(json.dumps({k: d[k] for k in ('uuid', 'name', 'enable', 'autostart', 'vcpus', 'memory_mib',
+    'imageref', 'networkref', 'macaddr', 'bootargs', 'notes', 'jailer', 'shutdown_timeout') if k in d}))
+" "$cur" "$2"
+}
+
+nat_params() {
+    # nat_params <uuid> <dhcp True|False>
+    python3 -c "
+import json
+print(json.dumps({
+    'uuid': '$1', 'name': '$TEST_NAT_NETWORK_NAME', 'type': 'nat', 'bridge': '',
+    'subnet': '$TEST_NAT_SUBNET', 'dhcp': $2, 'notes': 'RPC test NAT network'
+}))"
+}
+
+unit_active() { [ "$(systemctl is-active "$DHCP_UNIT" 2>/dev/null)" = "active" ]; }
+wait_unit_active() {
+    local _
+    for _ in $(seq 1 "${1:-15}"); do unit_active && return 0; sleep 1; done
+    return 1
+}
+
+# Sends one DNS query for "localhost" (answered from the host's /etc/hosts)
+# straight to dnsmasq on the gateway; prints the first A record.
+dns_query_localhost() {
+    python3 - "$1" <<'PY' 2>/dev/null
+import socket, struct, sys
+q = struct.pack('>HHHHHH', 0x4d56, 0x0100, 1, 0, 0, 0) + b'\x09localhost\x00' + struct.pack('>HH', 1, 1)
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3)
+s.sendto(q, (sys.argv[1], 53)); r, _ = s.recvfrom(512)
+if struct.unpack('>H', r[6:8])[0] and r[-6:-4] == b'\x00\x04':
+    print(socket.inet_ntoa(r[-4:]))
+PY
+}
+
+assert_rpc "setNetwork (create, nat type with DHCP)" "MicroVm" "setNetwork" "$(nat_params "$OMV_NEW_UUID" True)"
+NAT_NETWORK_UUID=$(json_uuid "$RPC_OUT")
+
+if [ -n "$NAT_NETWORK_UUID" ]; then
+    if ! ip link show "$TEST_NAT_BRIDGE" >/dev/null 2>&1; then
+        if unit_active; then
+            _fail "DHCP server not started before the network is up" "$DHCP_UNIT is active"
+        else
+            _pass "DHCP server not started before the network is up"
+        fi
+        DHCP_OUT=$(omv-microvm-dhcp "$TEST_NAT_NETWORK_NAME" 2>&1)
+        if [ $? -ne 0 ] && echo "$DHCP_OUT" | grep -q "not up"; then
+            _pass "omv-microvm-dhcp refuses to run without the bridge"
+        else
+            _fail "omv-microvm-dhcp refuses to run without the bridge" "$DHCP_OUT"
+        fi
+    else
+        _skip "DHCP server not started before the network is up" "bridge left over from an earlier run"
+        _skip "omv-microvm-dhcp refuses to run without the bridge" "bridge left over from an earlier run"
+    fi
+
+    assert_rpc "setNetwork (DHCP off)" "MicroVm" "setNetwork" "$(nat_params "$NAT_NETWORK_UUID" False)"
+    DHCP_OUT=$(omv-microvm-dhcp "$TEST_NAT_NETWORK_NAME" 2>&1)
+    if [ $? -ne 0 ] && echo "$DHCP_OUT" | grep -q "turned off"; then
+        _pass "omv-microvm-dhcp refuses to run with DHCP off"
+    else
+        _fail "omv-microvm-dhcp refuses to run with DHCP off" "$DHCP_OUT"
+    fi
+    assert_rpc "setNetwork (DHCP back on)" "MicroVm" "setNetwork" "$(nat_params "$NAT_NETWORK_UUID" True)"
+
+    if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
+        omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+        wait_for_state stopped 60 || true
+        assert_rpc "setVm (move to DHCP network, no MAC)" "MicroVm" "setVm" \
+            "$(vm_set networkref "\"$TEST_NAT_NETWORK_NAME\"" | python3 -c "
+import sys, json; d = json.load(sys.stdin); d['macaddr'] = ''; print(json.dumps(d))")"
+
+        assert_rpc "doCommand start (on DHCP network)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
+        wait_for_state running 60 || true
+
+        if wait_unit_active 15; then
+            _pass "DHCP server started with the first VM on the network"
+        else
+            _fail "DHCP server started with the first VM on the network" \
+                "$(journalctl -u "$DHCP_UNIT" -n 5 --no-pager -o cat 2>&1)"
+        fi
+
+        HOSTS_LINE=$(cat "${DHCP_DIR}/hosts/omvtest_microvm" 2>/dev/null)
+        if echo "$HOSTS_LINE" | grep -qE "^${EXPECTED_MAC},${TEST_NAT_SUBNET%.*/*}\.[0-9]+,infinite$"; then
+            _pass "Reservation written with the derived MAC ($HOSTS_LINE)"
+        else
+            _fail "Reservation written with the derived MAC" "got '${HOSTS_LINE}', expected MAC ${EXPECTED_MAC}"
+        fi
+
+        FC_SOCKET="/run/openmediavault-microvm/omvtest_microvm/firecracker.socket"
+        FC_VM_CONFIG=""
+        for _ in $(seq 1 30); do
+            if [ -S "$FC_SOCKET" ]; then
+                FC_VM_CONFIG=$(curl -sS --unix-socket "$FC_SOCKET" 'http://localhost/vm/config' 2>/dev/null)
+                [ -n "$FC_VM_CONFIG" ] && break
+            fi
+            sleep 1
+        done
+        if [ "$(echo "$FC_VM_CONFIG" | jq -r '."network-interfaces"[0].guest_mac' 2>/dev/null)" = "$EXPECTED_MAC" ]; then
+            _pass "VM runs with the derived MAC"
+        else
+            _fail "VM runs with the derived MAC" "$(echo "$FC_VM_CONFIG" | jq -c '."network-interfaces"' 2>&1)"
+        fi
+        RESERVED_IP=$(echo "$HOSTS_LINE" | cut -d, -f2)
+        if echo "$FC_VM_CONFIG" | jq -r '."boot-source".boot_args' 2>/dev/null \
+            | grep -qF "ip=${RESERVED_IP}::${TEST_NAT_GATEWAY}:"; then
+            _pass "Kernel ip= address matches the DHCP reservation"
+        else
+            _fail "Kernel ip= address matches the DHCP reservation" \
+                "boot_args=$(echo "$FC_VM_CONFIG" | jq -r '."boot-source".boot_args' 2>&1)"
+        fi
+        if echo "$FC_VM_CONFIG" | jq -r '."boot-source".boot_args' 2>/dev/null \
+            | grep -qF ":eth0:off:${TEST_NAT_GATEWAY}"; then
+            _pass "Kernel ip= names the gateway as DNS server"
+        else
+            _fail "Kernel ip= names the gateway as DNS server" \
+                "boot_args=$(echo "$FC_VM_CONFIG" | jq -r '."boot-source".boot_args' 2>&1)"
+        fi
+
+        if [ "$(dns_query_localhost "$TEST_NAT_GATEWAY")" = "127.0.0.1" ]; then
+            _pass "dnsmasq answers DNS on the gateway address"
+        else
+            _fail "dnsmasq answers DNS on the gateway address" "$(ss -Hlnu 2>&1 | grep -F "$TEST_NAT_GATEWAY")"
+        fi
+        if ss -Hlnu 2>/dev/null | grep -qE "%${TEST_NAT_BRIDGE}:67\b"; then
+            _pass "dnsmasq serves DHCP on the NAT bridge only"
+        else
+            _fail "dnsmasq serves DHCP on the NAT bridge only" "$(ss -Hlnu 2>&1 | grep ':67')"
+        fi
+
+        assert_rpc "setNetwork (DHCP off, network up)" "MicroVm" "setNetwork" "$(nat_params "$NAT_NETWORK_UUID" False)"
+        if unit_active; then
+            _fail "Turning DHCP off stops the server" "$DHCP_UNIT still active"
+        else
+            _pass "Turning DHCP off stops the server"
+        fi
+        assert_rpc "setNetwork (DHCP on, network up)" "MicroVm" "setNetwork" "$(nat_params "$NAT_NETWORK_UUID" True)"
+        if wait_unit_active 10; then
+            _pass "Turning DHCP on starts the server for a network that is up"
+        else
+            _fail "Turning DHCP on starts the server for a network that is up" "$DHCP_UNIT not active"
+        fi
+
+        omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+        wait_for_state stopped 60 || true
+        assert_rpc "setVm (back to the test bridge network)" "MicroVm" "setVm" \
+            "$(vm_set networkref "\"$TEST_NETWORK_NAME\"")"
+    else
+        for t in "setVm (move to DHCP network, no MAC)" "doCommand start (on DHCP network)" \
+            "DHCP server started with the first VM on the network" "Reservation written with the derived MAC" \
+            "VM runs with the derived MAC" "Kernel ip= address matches the DHCP reservation" \
+            "Kernel ip= names the gateway as DNS server" "dnsmasq answers DNS on the gateway address" \
+            "dnsmasq serves DHCP on the NAT bridge only" "Turning DHCP off stops the server" \
+            "Turning DHCP on starts the server for a network that is up" "setVm (back to the test bridge network)"; do
+            _skip "$t" "no vm uuid or real image"
+        done
+    fi
+
+    assert_rpc "deleteNetwork (NAT with DHCP)" "MicroVm" "deleteNetwork" "{\"uuid\":\"$NAT_NETWORK_UUID\"}"
+    NAT_NETWORK_UUID=""
+    if ! unit_active && [ ! -e "$DHCP_DIR" ] && ! ip link show "$TEST_NAT_BRIDGE" >/dev/null 2>&1; then
+        _pass "deleteNetwork stops DHCP and removes its state and bridge"
+    else
+        _fail "deleteNetwork stops DHCP and removes its state and bridge" \
+            "active=$(systemctl is-active "$DHCP_UNIT" 2>&1) dir=$(ls -d "$DHCP_DIR" 2>&1)"
+    fi
+else
+    _skip "NAT network DHCP" "no network uuid"
+fi
+
+# ---------------------------------------------------------------------------
+# 6e. Graceful shutdown
+# ---------------------------------------------------------------------------
+section "Graceful shutdown"
+
+VM_UNIT="omv-microvm@omvtest_microvm.service"
+
+# unit_log_since <epoch>: this VM unit's journal since then.
+unit_log_since() { journalctl -u "$VM_UNIT" --since "@$1" --no-pager -o cat 2>/dev/null; }
+
+# Waits for the guest to get far enough to act on Ctrl+Alt+Del.
+wait_guest_booted() {
+    local _
+    for _ in $(seq 1 90); do
+        grep -qiE 'login:|reached target' "${SF_PATH%/}/vms/omvtest_microvm/console.log" 2>/dev/null && return 0
+        sleep 1
+    done
+    return 1
+}
+
+if [ -n "$VM_UUID" ]; then
+    if systemctl show -p ExecStop --value "$VM_UNIT" 2>/dev/null | grep -q omv-microvm-shutdown; then
+        _pass "VM unit has the graceful ExecStop"
+    else
+        _fail "VM unit has the graceful ExecStop" "$(systemctl show -p ExecStop --value "$VM_UNIT" 2>&1)"
+    fi
+
+    assert_rpc "setVm (shutdown_timeout 20)" "MicroVm" "setVm" "$(vm_set shutdown_timeout 20)" '"shutdown_timeout": *20'
+    assert_rpc "setVm (shutdown_timeout omitted keeps it)" "MicroVm" "setVm" \
+        "$(vm_set shutdown_timeout 20 | python3 -c "
+import sys, json; d = json.load(sys.stdin); d.pop('shutdown_timeout'); print(json.dumps(d))")" '"shutdown_timeout": *20'
+    assert_rpc_fails "setVm (shutdown_timeout 301)" "MicroVm" "setVm" "$(vm_set shutdown_timeout 301)"
+
+    if [ -n "$REAL_IMAGE_REF" ] && [ "$(uname -m)" = "x86_64" ]; then
+        assert_rpc "doCommand start (for graceful stop)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
+        wait_for_state running 60 || true
+        wait_guest_booted || info "Guest boot not seen on the console; trying the shutdown anyway."
+
+        T0=$(date +%s)
+        assert_rpc "doCommand stop (graceful)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}"
+        if [ $(( $(date +%s) - T0 )) -le 5 ]; then
+            _pass "doCommand stop returns without waiting for the guest"
+        else
+            _fail "doCommand stop returns without waiting for the guest" "took $(( $(date +%s) - T0 ))s"
+        fi
+        if wait_for_state stopped 60 && unit_log_since "$T0" | grep -q "Guest shut down."; then
+            _pass "Guest shuts down cleanly on stop"
+        else
+            _fail "Guest shuts down cleanly on stop" "state=$(vm_state); $(unit_log_since "$T0" | tail -5)"
+        fi
+
+        assert_rpc "setVm (shutdown_timeout 0)" "MicroVm" "setVm" "$(vm_set shutdown_timeout 0)"
+        omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}" >/dev/null 2>&1
+        wait_for_state running 60 || true
+        T0=$(date +%s)
+        omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1
+        if wait_for_state stopped 20 && unit_log_since "$T0" | grep -q "Graceful shutdown disabled"; then
+            _pass "shutdown_timeout 0 stops hard right away"
+        else
+            _fail "shutdown_timeout 0 stops hard right away" "state=$(vm_state); $(unit_log_since "$T0" | tail -5)"
+        fi
+    else
+        for t in "doCommand start (for graceful stop)" "doCommand stop (graceful)" \
+            "doCommand stop returns without waiting for the guest" "Guest shuts down cleanly on stop" \
+            "setVm (shutdown_timeout 0)" "shutdown_timeout 0 stops hard right away"; do
+            _skip "$t" "needs a real image on x86_64"
+        done
+    fi
+
+    assert_rpc "setVm (shutdown_timeout back to 30)" "MicroVm" "setVm" "$(vm_set shutdown_timeout 30)"
+else
+    _skip "Graceful shutdown" "no vm uuid"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1143,6 +1419,7 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
             _fail "VM boots successfully after being restored from backup" "state=$(vm_state) after waiting"
         fi
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+        wait_for_state stopped 60 || true
 
         BACKUP_UUID=$(grep ",${BACKUP_TEST_DIR%/}/\\?,omvtest_microvm,${BACKUP_DATE}," /etc/omv-microvm-backup.list 2>/dev/null | head -1 | cut -d, -f1)
         if [ -n "$BACKUP_UUID" ]; then

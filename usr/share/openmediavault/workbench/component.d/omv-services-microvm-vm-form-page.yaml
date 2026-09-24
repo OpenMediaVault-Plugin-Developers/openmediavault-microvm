@@ -98,6 +98,16 @@ data:
         label: _("Boot arguments")
         value: "console=ttyS0 reboot=k panic=1 pci=off"
         hint: _("Keep console=ttyS0 — removing it (or pointing it elsewhere) silences the guest's serial console. The VM will still boot and run fine, but the Console log and the cterm terminal will show nothing.")
+      - type: numberInput
+        name: shutdown_timeout
+        label: _("Shutdown timeout (seconds)")
+        value: 30
+        hint: _("How long Stop and Restart wait for the guest to shut down cleanly (sent Ctrl+Alt+Del) before stopping it hard. 0 always stops hard. x86_64 hosts only; on aarch64 Stop is always hard. Force stop never waits.")
+        validators:
+          min: 0
+          max: 300
+          patternType: integer
+          required: true
       - type: divider
         title: _("Security")
       - type: checkbox

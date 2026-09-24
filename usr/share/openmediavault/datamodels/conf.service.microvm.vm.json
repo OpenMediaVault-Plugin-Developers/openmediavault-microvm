@@ -61,6 +61,12 @@
       "minimum": 0,
       "default": 0
     },
+    "shutdown_timeout": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 300,
+      "default": 30
+    },
     "notes": {
       "type": "string",
       "default": ""

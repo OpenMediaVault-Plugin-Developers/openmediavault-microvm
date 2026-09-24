@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-dhcp — run dnsmasq as the DHCP and DNS server of a private
+# NAT network whose "Run DHCP" option is on.
+#
+# Invoked as `ExecStart=/usr/sbin/omv-microvm-dhcp %i` by
+# omv-microvm-dhcp@.service, which omv-microvm-run starts when a VM on such
+# a network starts (the bridge must exist by then).
+#
+# DHCP only hands out reservations: each VM start drops a "<mac>,<ip>" file
+# into the hosts directory with the same address its kernel is given via
+# "ip=", so guests that do run a DHCP client end up with that same address
+# (plus DNS), and guests that don't are unaffected. dnsmasq picks up new
+# files there by itself.
+#
+# Usage: omv-microvm-dhcp <network-name>
+
+set -eu
+
+. /usr/share/openmediavault/scripts/helper-functions
+
+NETNAME="${1:?usage: omv-microvm-dhcp <network-name>}"
+
+die() {
+    echo "ERROR: ${NETNAME}: $*" >&2
+    exit 1
+}
+
+NETWORK_XPATH="/config/services/microvm/networks/network[name='${NETNAME}']"
+omv_config_exists "$NETWORK_XPATH" || die "Network not found in configuration."
+[ "$(omv_config_get "${NETWORK_XPATH}/type")" = "nat" ] || die "Not a private NAT network."
+omv_checkyesno "$(omv_config_get "${NETWORK_XPATH}/dhcp")" || die "DHCP is turned off for this network."
+SUBNET=$(omv_config_get "${NETWORK_XPATH}/subnet")
+
+NET_ADDR="${SUBNET%/*}"
+PREFIX="${SUBNET#*/}"
+_ip_to_int() { local a b c d; IFS=. read -r a b c d <<< "$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
+_int_to_ip() { local n=$1; echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"; }
+HOST_BITS=$((32 - PREFIX))
+NETMASK=$(_int_to_ip "$(( (0xFFFFFFFF << HOST_BITS) & 0xFFFFFFFF ))")
+
+# Must match omv-microvm-ensure-nat-network.
+BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-7)"
+ip link show "$BRIDGE" >/dev/null 2>&1 || die "Bridge ${BRIDGE} is not up; it is created when a VM on this network starts."
+
+# Must match omv-microvm-run.
+DHCP_DIR="/run/openmediavault-microvm-dhcp/${NETNAME}"
+mkdir -p "${DHCP_DIR}/hosts"
+
+# --conf-file=/dev/null: nothing from a system-wide dnsmasq setup leaks in.
+# --bind-interfaces: only this bridge's address, so it coexists with other
+# dnsmasq instances (e.g. libvirt's) and DNS servers on other addresses.
+exec dnsmasq \
+    --keep-in-foreground \
+    --conf-file=/dev/null \
+    --log-facility=- \
+    --pid-file= \
+    --interface="$BRIDGE" \
+    --bind-interfaces \
+    --dhcp-range="${NET_ADDR},static,${NETMASK},12h" \
+    --dhcp-hostsdir="${DHCP_DIR}/hosts" \
+    --dhcp-leasefile="${DHCP_DIR}/leases" \
+    --dhcp-authoritative

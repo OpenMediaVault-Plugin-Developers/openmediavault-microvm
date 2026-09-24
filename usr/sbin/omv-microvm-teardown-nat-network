@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # omv-microvm-teardown-nat-network — remove the bridge and NAT/forwarding
-# rules created by omv-microvm-ensure-nat-network for a network that is
-# being deleted.
+# rules created by omv-microvm-ensure-nat-network, and stop its DHCP server,
+# for a network that is being deleted.
 #
 # Invoked by deleteNetwork() in the MicroVm RPC service. Not called on
 # ordinary VM stop — like a real host bridge, a NAT network persists across
@@ -16,6 +16,9 @@ set -uo pipefail
 NETNAME="${1:?usage: omv-microvm-teardown-nat-network <network-name>}"
 BRIDGE="mvm-nat-$(echo -n "$NETNAME" | md5sum | cut -c1-7)"
 RULE_TAG="mvm-net:${NETNAME}"
+
+systemctl stop "omv-microvm-dhcp@${NETNAME}.service" 2>/dev/null || true
+rm -rf "/run/openmediavault-microvm-dhcp/${NETNAME}"
 
 for chain in postrouting forward; do
     handles=$(nft -a list chain ip mvm_nat "$chain" 2>/dev/null \

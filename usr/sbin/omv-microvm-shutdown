@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#
+# omv-microvm-shutdown — ask a running microVM's guest to shut down cleanly
+# and wait for it, up to the VM's shutdown timeout.
+#
+# Invoked as `ExecStop=/usr/sbin/omv-microvm-shutdown %i` by
+# omv-microvm@.service, which passes the main (dtach) process in $MAINPID.
+# However this returns, systemd then SIGTERMs whatever is left of the unit —
+# the plain hard stop — so every failure path here just gives up early.
+#
+# Firecracker's only guest shutdown request is Ctrl+Alt+Del (x86_64 only).
+# The guest handles it as a reboot, and since Firecracker can't reboot a
+# guest (reboot=k), it exits once the guest has gone down.
+#
+# Usage: omv-microvm-shutdown <vm-name>
+
+set -uo pipefail
+
+. /usr/share/openmediavault/scripts/helper-functions
+
+VMNAME="${1:?usage: omv-microvm-shutdown <vm-name>}"
+
+_log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
+}
+
+MAIN_PID="${MAINPID:-}"
+[ -n "$MAIN_PID" ] && kill -0 "$MAIN_PID" 2>/dev/null || exit 0
+
+# Empty for VMs saved before the setting existed.
+TIMEOUT=$(omv_config_get "/config/services/microvm/vms/vm[name='${VMNAME}']/shutdown_timeout")
+case "$TIMEOUT" in
+    ''|*[!0-9]*) TIMEOUT=30 ;;
+esac
+[ "$TIMEOUT" -le 300 ] || TIMEOUT=300
+if [ "$TIMEOUT" -eq 0 ]; then
+    _log "Graceful shutdown disabled; stopping hard."
+    exit 0
+fi
+if [ "$(uname -m)" != "x86_64" ]; then
+    _log "Firecracker has no guest shutdown request on $(uname -m); stopping hard."
+    exit 0
+fi
+
+# Must match the derivation in omv-microvm-run.
+SOCKET_PATH="/run/openmediavault-microvm/${VMNAME}/firecracker.socket"
+[ -S "$SOCKET_PATH" ] || exit 0
+
+# A paused guest (e.g. mid-snapshot) can't act on the request.
+STATE=$(curl -sS --max-time 5 --unix-socket "$SOCKET_PATH" 'http://localhost/' 2>/dev/null | jq -r '.state // empty' 2>/dev/null)
+if [ "$STATE" != "Running" ]; then
+    _log "VM is ${STATE:-not responding}; stopping hard."
+    exit 0
+fi
+
+http_code=$(curl -sS --max-time 5 --unix-socket "$SOCKET_PATH" -o /dev/null -w '%{http_code}' \
+    -X PUT 'http://localhost/actions' -H 'Content-Type: application/json' \
+    -d '{"action_type": "SendCtrlAltDel"}' 2>/dev/null)
+if [ "${http_code:-0}" -lt 200 ] || [ "${http_code:-0}" -ge 300 ]; then
+    _log "Shutdown request rejected (HTTP ${http_code:-none}); stopping hard."
+    exit 0
+fi
+
+_log "Asked the guest to shut down; waiting up to ${TIMEOUT}s ..."
+for _ in $(seq 1 $((TIMEOUT * 2))); do
+    if ! kill -0 "$MAIN_PID" 2>/dev/null; then
+        _log "Guest shut down."
+        exit 0
+    fi
+    sleep 0.5
+done
+
+_log "Guest did not shut down within ${TIMEOUT}s; stopping hard."
+exit 0

@@ -361,7 +361,7 @@ data:
                   uuid: "{{ _selected[0].uuid }}"
                   command: "restart"
                 progressMessage: _("Restarting ...")
-                successNotification: _("Restarted.")
+                successNotification: _("Restart requested. The guest is asked to shut down first.")
                 task: false
             enabledConstraints:
               minSelected: 1
@@ -382,7 +382,7 @@ data:
                   uuid: "{{ _selected[0].uuid }}"
                   command: "stop"
                 progressMessage: _("Stopping ...")
-                successNotification: _("Stopped.")
+                successNotification: _("Shutdown requested. The VM stops once the guest has shut down, or after its shutdown timeout.")
                 task: false
             enabledConstraints:
               minSelected: 1

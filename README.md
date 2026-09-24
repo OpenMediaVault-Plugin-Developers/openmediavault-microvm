@@ -48,3 +48,19 @@ tooling that talks to it works either way. A warm snapshot or backup
 records whether it was taken jailed (a `jailed` file next to `vmstate`)
 and only restores with the same setting, because its device state holds
 the paths Firecracker saw; cold ones restore either way.
+
+Every VM on a private NAT network gets a fixed address, passed to its
+kernel via `ip=` so no in-guest DHCP client is needed. With "Run DHCP" on,
+`omv-microvm-dhcp@<network>.service` (dnsmasq, bound to the network's
+bridge only) also runs on the gateway address. It hands each VM that same
+address as a DHCP reservation and answers DNS, and the gateway is passed
+as the DNS server in `ip=` too. A VM without a MAC address set gets a fixed
+one (`02:fc:…`) derived from its name, so its reservation matches every
+boot. The server starts with the first VM on the network.
+
+Stop and Restart shut guests down cleanly. `omv-microvm-shutdown` (the
+unit's ExecStop) sends Ctrl+Alt+Del through the Firecracker API. The guest
+treats it as a reboot, and Firecracker exits once the guest is down. It
+waits up to the VM's shutdown timeout (default 30s, 0 to always stop hard)
+and then stops hard. Firecracker only supports this on x86_64, and Force
+stop and VM deletion never wait.

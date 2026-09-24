@@ -388,8 +388,28 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             }
         }
         $db->set($object);
+        $this->syncDhcpServer($object);
         $this->applyChanges($context);
         return $object->getAssoc();
+    }
+
+    // The DHCP server is started by the first VM that starts on a network
+    // (see omv-microvm-run); this only follows setting changes for a
+    // network that is already up. VMs already running on it registered
+    // their reservations when they started only if DHCP was on then.
+    private function syncDhcpServer($network)
+    {
+        $name = $network->get('name');
+        $unit = sprintf("omv-microvm-dhcp@%s.service", $name);
+        if ('nat' !== $network->get('type') || !boolval($network->get('dhcp'))) {
+            $this->systemctlQuiet(['stop', $unit]);
+            return;
+        }
+        // Must match omv-microvm-ensure-nat-network.
+        $bridge = sprintf("mvm-nat-%s", substr(md5($name), 0, 7));
+        if (is_dir(sprintf("/sys/class/net/%s", $bridge))) {
+            $this->systemctlQuiet(['restart', $unit]);
+        }
     }
 
     public function deleteNetwork($params, $context)
@@ -548,9 +568,11 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             $existing = $db->get("conf.service.microvm.vm", $object->get('uuid'));
             // Allocated once, never taken from the client.
             $object->set('jail_uid', $existing->get('jail_uid'));
-            // Optional for API callers that predate the setting.
-            if (!array_key_exists('jailer', $params)) {
-                $object->set('jailer', $existing->get('jailer'));
+            // Optional for API callers that predate these settings.
+            foreach (['jailer', 'shutdown_timeout'] as $key) {
+                if (!array_key_exists($key, $params)) {
+                    $object->set($key, $existing->get($key));
+                }
             }
             if (boolval($existing->get('jailer')) !== boolval($object->get('jailer'))) {
                 $state = $this->getActiveState($existing->get('name'));
@@ -607,24 +629,31 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
             case 'start':
                 $this->systemctlCommand(['start', $unit], gettext("Failed to start VM."));
                 break;
+            // Not waited for: the unit's ExecStop (omv-microvm-shutdown)
+            // gives the guest up to its shutdown timeout to go down, which
+            // can outlast the web UI's request timeout. The VM list shows
+            // 'stopping' meanwhile.
             case 'stop':
-                // Hard stop: terminates the supervised process (systemd
-                // sends SIGTERM to the whole cgroup). Firecracker does
-                // expose a host-triggered graceful option (the
-                // SendCtrlAltDel action over its API socket), but this VM
-                // doesn't use it — deliberately kept simple for now.
-                $this->systemctlCommand(['stop', $unit], gettext("Failed to stop VM."));
+                $this->systemctlCommand(['stop', '--no-block', $unit], gettext("Failed to stop VM."));
                 break;
             case 'restart':
-                $this->systemctlCommand(['restart', $unit], gettext("Failed to restart VM."));
+                $this->systemctlCommand(['restart', '--no-block', $unit], gettext("Failed to restart VM."));
                 break;
             case 'forcestop':
                 $this->systemctlCommand(['kill', '--signal=SIGKILL', $unit],
                     gettext("Failed to force stop VM."));
                 break;
             case 'delete':
+                // No point shutting down a guest that's being deleted, and
+                // this has to finish within the request.
+                $this->systemctlQuiet(['kill', '--signal=SIGKILL', $unit]);
                 $this->systemctlQuiet(['stop', $unit]);
                 $this->systemctlQuiet(['disable', $unit]);
+                // Its DHCP reservation, if it's on a DHCP network (see
+                // omv-microvm-run).
+                foreach (glob(sprintf('/run/openmediavault-microvm-dhcp/*/hosts/%s', $name)) as $f) {
+                    @unlink($f);
+                }
                 // Data disks go with the VM, wherever they're stored.
                 foreach ($this->vmDisks($name) as $disk) {
                     $diskPath = $this->diskPath($context, $disk);

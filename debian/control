@@ -10,6 +10,7 @@ Homepage: http://omv-extras.org/
 Package: openmediavault-microvm
 Architecture: all
 Depends: curl,
+         dnsmasq-base,
          dtach,
          e2fsprogs,
          openmediavault (>= 8),
