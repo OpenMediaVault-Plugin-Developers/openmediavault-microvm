@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# build-debian-image — build a Debian 13 (trixie) kernel + rootfs pair for
+# Firecracker, in the shape omv-microvm-run expects.
+#
+# Not part of the package: a helper for making an image to host somewhere
+# and add via "Download" with custom URLs (a plain .ext4 rootfs_url is
+# fetched as-is, no squashfs step). See firecracker-guest.sh for the kernel
+# and the guest setup.
+#
+# Needs root and mmdebstrap (apt install mmdebstrap). Building for the
+# other architecture also needs qemu-user-static + binfmt-support.
+#
+# Usage: build-debian-image [options] <output-dir>
+#   --arch <x86_64|aarch64>   guest architecture (default: host's)
+#   --size <MiB>              rootfs size (default: content + 512 MiB)
+#   --hostname <name>         default: debian
+#   --root-password <pw>      set root's password (default: none, root
+#                             is logged in automatically on the console)
+#   --ssh-key <file>          install openssh-server with this
+#                             authorized_keys file for root
+#   --packages <a,b,...>      extra packages to install
+#   --mirror <url>            default: http://deb.debian.org/debian
+#   --kernel <file>           use this vmlinux instead of downloading one
+#
+# Writes <output-dir>/vmlinux and <output-dir>/rootfs.ext4.
+
+set -euo pipefail
+
+. "$(dirname "$(readlink -f "$0")")/firecracker-guest.sh"
+
+SUITE="trixie"
+
+ARCH=$(uname -m)
+SIZE_MIB=""
+GUEST_HOSTNAME="debian"
+ROOT_PASSWORD=""
+SSH_KEY=""
+EXTRA_PACKAGES=""
+MIRROR="http://deb.debian.org/debian"
+KERNEL_FILE=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --arch) ARCH="${2:?}"; shift 2 ;;
+        --size) SIZE_MIB="${2:?}"; shift 2 ;;
+        --hostname) GUEST_HOSTNAME="${2:?}"; shift 2 ;;
+        --root-password) ROOT_PASSWORD="${2:?}"; shift 2 ;;
+        --ssh-key) SSH_KEY="${2:?}"; shift 2 ;;
+        --packages) EXTRA_PACKAGES="${2:?}"; shift 2 ;;
+        --mirror) MIRROR="${2:?}"; shift 2 ;;
+        --kernel) KERNEL_FILE="${2:?}"; shift 2 ;;
+        -h|--help) usage 0 ;;
+        -*) die "Unknown option: $1" ;;
+        *) break ;;
+    esac
+done
+[ $# -eq 1 ] || usage 1
+OUT_DIR="$1"
+
+case "$ARCH" in
+    x86_64) DEB_ARCH="amd64" ;;
+    aarch64) DEB_ARCH="arm64" ;;
+    *) die "Unsupported architecture '${ARCH}' (x86_64 or aarch64)." ;;
+esac
+[ "$(id -u)" -eq 0 ] || die "Must be run as root."
+command -v mmdebstrap >/dev/null || die "mmdebstrap not found (apt install mmdebstrap)."
+[ -z "$SSH_KEY" ] || [ -f "$SSH_KEY" ] || die "SSH key file not found: ${SSH_KEY}"
+[ -z "$KERNEL_FILE" ] || [ -f "$KERNEL_FILE" ] || die "Kernel not found: ${KERNEL_FILE}"
+[ -z "$SIZE_MIB" ] || [[ "$SIZE_MIB" =~ ^[0-9]+$ ]] || die "--size must be a number of MiB."
+
+mkdir -p "$OUT_DIR"
+TMP_DIR=$(mktemp -d "${OUT_DIR%/}/.build.XXXXXX")
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+ROOT="${TMP_DIR}/root"
+
+fetch_kernel "$ARCH" "${TMP_DIR}/vmlinux" "$KERNEL_FILE"
+
+# No kernel or bootloader: the kernel comes from outside the image. udev
+# and dbus are needed by systemd-networkd/resolved.
+PACKAGES="systemd-sysv,udev,dbus,systemd-resolved,iproute2,iputils-ping,ca-certificates,procps,less"
+[ -z "$SSH_KEY" ] || PACKAGES="${PACKAGES},openssh-server"
+[ -z "$EXTRA_PACKAGES" ] || PACKAGES="${PACKAGES},${EXTRA_PACKAGES}"
+
+_log "Bootstrapping Debian ${SUITE} (${DEB_ARCH}) ..."
+mmdebstrap --mode=root --variant=minbase --architectures="$DEB_ARCH" \
+    --include="$PACKAGES" "$SUITE" "$ROOT" \
+    "deb ${MIRROR} ${SUITE} main" \
+    "deb ${MIRROR} ${SUITE}-updates main" \
+    "deb http://security.debian.org/debian-security ${SUITE}-security main"
+
+_log "Configuring the guest ..."
+configure_guest "$ROOT" "$GUEST_HOSTNAME" "$ROOT_PASSWORD" "$SSH_KEY" ssh.service
+rm -rf "${ROOT}"/var/cache/apt/archives/*.deb "${ROOT}"/var/lib/apt/lists/*
+
+build_ext4 "$ROOT" "${TMP_DIR}/rootfs.ext4" "$SIZE_MIB"
+
+mv -f "${TMP_DIR}/vmlinux" "${OUT_DIR}/vmlinux"
+mv -f "${TMP_DIR}/rootfs.ext4" "${OUT_DIR}/rootfs.ext4"
+
+_log "Done: ${OUT_DIR}/vmlinux, ${OUT_DIR}/rootfs.ext4"

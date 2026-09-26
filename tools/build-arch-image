@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+#
+# build-arch-image — build an Arch Linux kernel + rootfs pair for
+# Firecracker, in the shape omv-microvm-run expects.
+#
+# Not part of the package: a helper for making an image to host somewhere
+# and add via "Download" with custom URLs (a plain .ext4 rootfs_url is
+# fetched as-is, no squashfs step). See firecracker-guest.sh for the kernel
+# and the guest setup.
+#
+# Works on a non-Arch host: the rootfs is installed with pacstrap from
+# inside Arch's official bootstrap tarball, run in a private mount
+# namespace so none of its mounts outlive it.
+#
+# x86_64 only — Arch itself doesn't publish aarch64 (that's the separate
+# Arch Linux ARM project). Needs root and zstd.
+#
+# Usage: build-arch-image [options] <output-dir>
+#   --size <MiB>              rootfs size (default: content + 512 MiB)
+#   --hostname <name>         default: arch
+#   --root-password <pw>      set root's password (default: none, root
+#                             is logged in automatically on the console)
+#   --ssh-key <file>          install openssh with this authorized_keys
+#                             file for root
+#   --packages <a,b,...>      extra packages to install
+#   --mirror <url>            default: https://geo.mirror.pkgbuild.com
+#   --kernel <file>           use this vmlinux instead of downloading one
+#
+# Writes <output-dir>/vmlinux and <output-dir>/rootfs.ext4.
+
+set -euo pipefail
+
+. "$(dirname "$(readlink -f "$0")")/firecracker-guest.sh"
+
+ARCH="x86_64"
+SIZE_MIB=""
+GUEST_HOSTNAME="arch"
+ROOT_PASSWORD=""
+SSH_KEY=""
+EXTRA_PACKAGES=""
+MIRROR="https://geo.mirror.pkgbuild.com"
+KERNEL_FILE=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --size) SIZE_MIB="${2:?}"; shift 2 ;;
+        --hostname) GUEST_HOSTNAME="${2:?}"; shift 2 ;;
+        --root-password) ROOT_PASSWORD="${2:?}"; shift 2 ;;
+        --ssh-key) SSH_KEY="${2:?}"; shift 2 ;;
+        --packages) EXTRA_PACKAGES="${2:?}"; shift 2 ;;
+        --mirror) MIRROR="${2%/}"; shift 2 ;;
+        --kernel) KERNEL_FILE="${2:?}"; shift 2 ;;
+        -h|--help) usage 0 ;;
+        -*) die "Unknown option: $1" ;;
+        *) break ;;
+    esac
+done
+[ $# -eq 1 ] || usage 1
+OUT_DIR="$1"
+
+[ "$(uname -m)" = "$ARCH" ] || die "Must be built on an x86_64 host."
+[ "$(id -u)" -eq 0 ] || die "Must be run as root."
+command -v zstd >/dev/null || die "zstd not found (apt install zstd)."
+[ -z "$SSH_KEY" ] || [ -f "$SSH_KEY" ] || die "SSH key file not found: ${SSH_KEY}"
+[ -z "$KERNEL_FILE" ] || [ -f "$KERNEL_FILE" ] || die "Kernel not found: ${KERNEL_FILE}"
+[ -z "$SIZE_MIB" ] || [[ "$SIZE_MIB" =~ ^[0-9]+$ ]] || die "--size must be a number of MiB."
+
+mkdir -p "$OUT_DIR"
+TMP_DIR=$(mktemp -d "${OUT_DIR%/}/.build.XXXXXX")
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+BOOTSTRAP="${TMP_DIR}/root.${ARCH}"
+ROOT="${TMP_DIR}/root"
+
+fetch_kernel "$ARCH" "${TMP_DIR}/vmlinux" "$KERNEL_FILE"
+
+TARBALL="archlinux-bootstrap-${ARCH}.tar.zst"
+_log "Downloading ${MIRROR}/iso/latest/${TARBALL} ..."
+wget --quiet --show-progress -O "${TMP_DIR}/${TARBALL}" "${MIRROR}/iso/latest/${TARBALL}"
+wget --quiet -O "${TMP_DIR}/sha256sums.txt" "${MIRROR}/iso/latest/sha256sums.txt"
+(cd "$TMP_DIR" && grep " ${TARBALL}\$" sha256sums.txt | sha256sum -c --quiet) \
+    || die "Checksum mismatch for ${TARBALL}."
+
+_log "Unpacking the bootstrap environment ..."
+tar --zstd -xf "${TMP_DIR}/${TARBALL}" -C "$TMP_DIR" --numeric-owner
+rm -f "${TMP_DIR}/${TARBALL}"
+# pacstrap copies this mirrorlist into the new system too.
+echo "Server = ${MIRROR}/\$repo/os/\$arch" > "${BOOTSTRAP}/etc/pacman.d/mirrorlist"
+cp -L /etc/resolv.conf "${BOOTSTRAP}/etc/resolv.conf"
+mkdir -p "$ROOT"
+
+# No kernel or bootloader: the kernel comes from outside the image. base
+# already has systemd (networkd, resolved), iproute2 and iputils.
+PACKAGES=(base less ca-certificates)
+[ -z "$SSH_KEY" ] || PACKAGES+=(openssh)
+if [ -n "$EXTRA_PACKAGES" ]; then
+    IFS=, read -ra EXTRA <<< "$EXTRA_PACKAGES"
+    PACKAGES+=("${EXTRA[@]}")
+fi
+
+_log "Installing Arch Linux (${PACKAGES[*]}) ..."
+# shellcheck disable=SC2016 # expanded by the inner bash
+unshare --mount --propagation private -- bash -euc '
+    b="$1" r="$2"; shift 2
+    mount --bind "$b" "$b"
+    mount -t proc proc "${b}/proc"
+    mount --rbind /sys "${b}/sys"
+    mount --rbind /dev "${b}/dev"
+    mount --bind "$r" "${b}/mnt"
+    chroot "$b" pacman-key --init
+    chroot "$b" pacman-key --populate archlinux
+    chroot "$b" pacstrap -K /mnt "$@"
+' _ "$BOOTSTRAP" "$ROOT" "${PACKAGES[@]}"
+
+_log "Configuring the guest ..."
+configure_guest "$ROOT" "$GUEST_HOSTNAME" "$ROOT_PASSWORD" "$SSH_KEY" sshd.service
+
+# pacstrap -K made a keyring with its own private master key; every VM
+# makes its own on first boot instead, as Arch's cloud images do.
+rm -rf "${ROOT}/etc/pacman.d/gnupg"
+cat > "${ROOT}/etc/systemd/system/pacman-init.service" <<'EOF'
+[Unit]
+Description=Initialize the pacman keyring
+ConditionPathExists=!/etc/pacman.d/gnupg/trustdb.gpg
+After=time-sync.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/pacman-key --init
+ExecStart=/usr/bin/pacman-key --populate archlinux
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl --root="$ROOT" enable pacman-init.service
+rm -rf "${ROOT}"/var/cache/pacman/pkg/*
+
+build_ext4 "$ROOT" "${TMP_DIR}/rootfs.ext4" "$SIZE_MIB"
+
+mv -f "${TMP_DIR}/vmlinux" "${OUT_DIR}/vmlinux"
+mv -f "${TMP_DIR}/rootfs.ext4" "${OUT_DIR}/rootfs.ext4"
+
+_log "Done: ${OUT_DIR}/vmlinux, ${OUT_DIR}/rootfs.ext4"
