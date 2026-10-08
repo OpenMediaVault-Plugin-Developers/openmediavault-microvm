@@ -748,12 +748,47 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
         else
             _fail "Filesystem is clean after resize" "e2fsck reported errors"
         fi
+
+        # A force stop (SIGKILL) leaves the unit failed — 'error' in the UI —
+        # which must not block a resize or a snapshot.
+        assert_rpc "doCommand start (before force stop)" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
+        wait_for_state running 60 || true
+        assert_rpc "doCommand forcestop" "MicroVm" "doCommand" \
+            "{\"uuid\":\"$VM_UUID\",\"command\":\"forcestop\"}"
+        if wait_for_state error 30; then
+            FS_RESIZE_OUT=$(omv-rpc -u admin "MicroVm" "resizeDisk" \
+                "{\"vmuuid\":\"$VM_UUID\",\"size_mib\":\"$((NEW_MIB + 128))\"}" 2>&1)
+            if BG_RESULT=$(wait_bg "$FS_RESIZE_OUT" 60); then
+                _pass "resizeDisk (VM force-stopped, state 'error')"
+            else
+                _fail "resizeDisk (VM force-stopped, state 'error')" "$(echo "$BG_RESULT" | tail -5)"
+            fi
+            FS_SNAP_OUT=$(omv-rpc -u admin "MicroVm" "createSnapshot" \
+                "{\"vmuuid\":\"$VM_UUID\",\"name\":\"omvtest-forcestop-snap\",\"notes\":\"\"}" 2>&1)
+            if BG_RESULT=$(wait_bg "$FS_SNAP_OUT" 60); then
+                _pass "createSnapshot (VM force-stopped, state 'error')"
+            else
+                _fail "createSnapshot (VM force-stopped, state 'error')" "$(echo "$BG_RESULT" | tail -5)"
+            fi
+            FS_SNAP_ID=$(find_snapshot_id "omvtest-forcestop-snap")
+            [ -z "$FS_SNAP_ID" ] || omv-rpc -u admin "MicroVm" "deleteSnapshot" \
+                "{\"vmuuid\":\"$VM_UUID\",\"snapshotid\":\"$FS_SNAP_ID\"}" >/dev/null 2>&1 || true
+        else
+            _skip "resizeDisk (VM force-stopped, state 'error')" "state after force stop: $(vm_state)"
+            _skip "createSnapshot (VM force-stopped, state 'error')" "state after force stop: $(vm_state)"
+        fi
+        # Later sections wait for 'stopped'.
+        systemctl reset-failed omv-microvm@omvtest_microvm.service 2>/dev/null || true
+        wait_for_state stopped 30 || true
     else
         _skip "resizeDisk (shrink rejected)" "rootfs missing/empty"
         _skip "resizeDisk (VM running)" "rootfs missing/empty"
         _skip "resizeDisk (grow, real disk)" "rootfs missing/empty"
         _skip "Rootfs file grew to the requested size" "rootfs missing/empty"
         _skip "Filesystem is clean after resize" "rootfs missing/empty"
+        _skip "resizeDisk (VM force-stopped, state 'error')" "rootfs missing/empty"
+        _skip "createSnapshot (VM force-stopped, state 'error')" "rootfs missing/empty"
     fi
 else
     _skip "resizeDisk (shrink rejected)" "no vm uuid or real image"
@@ -761,6 +796,8 @@ else
     _skip "resizeDisk (grow, real disk)" "no vm uuid or real image"
     _skip "Rootfs file grew to the requested size" "no vm uuid or real image"
     _skip "Filesystem is clean after resize" "no vm uuid or real image"
+    _skip "resizeDisk (VM force-stopped, state 'error')" "no vm uuid or real image"
+    _skip "createSnapshot (VM force-stopped, state 'error')" "no vm uuid or real image"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1090,6 +1127,12 @@ TEST_NAT_NETWORK_NAME="omvtest_natdhcp"
 # Override if this happens to overlap a host network.
 TEST_NAT_SUBNET="${OMVTEST_NAT_SUBNET:-172.31.254.0/24}"
 TEST_NAT_GATEWAY="${TEST_NAT_SUBNET%.*/*}.1"
+# What the subnet is changed to near the end; must not overlap either.
+TEST_NAT_SUBNET2="${OMVTEST_NAT_SUBNET2:-172.31.253.0/24}"
+TEST_NAT_GATEWAY2="${TEST_NAT_SUBNET2%.*/*}.1"
+NAT_RULE_TAG="mvm-net:${TEST_NAT_NETWORK_NAME}"
+# Must match omv-microvm-run.
+NAT_IPS_DIR="/var/lib/openmediavault-microvm/nat-ips/${TEST_NAT_NETWORK_NAME}"
 DHCP_UNIT="omv-microvm-dhcp@${TEST_NAT_NETWORK_NAME}.service"
 # Must match omv-microvm-run / omv-microvm-dhcp / omv-microvm-ensure-nat-network.
 DHCP_DIR="/run/openmediavault-microvm-dhcp/${TEST_NAT_NETWORK_NAME}"
@@ -1110,12 +1153,12 @@ print(json.dumps({k: d[k] for k in ('uuid', 'name', 'enable', 'autostart', 'vcpu
 }
 
 nat_params() {
-    # nat_params <uuid> <dhcp True|False>
+    # nat_params <uuid> <dhcp True|False> [<subnet>]
     python3 -c "
 import json
 print(json.dumps({
     'uuid': '$1', 'name': '$TEST_NAT_NETWORK_NAME', 'type': 'nat', 'bridge': '',
-    'subnet': '$TEST_NAT_SUBNET', 'dhcp': $2, 'notes': 'RPC test NAT network'
+    'subnet': '${3:-$TEST_NAT_SUBNET}', 'dhcp': $2, 'notes': 'RPC test NAT network'
 }))"
 }
 
@@ -1176,6 +1219,18 @@ if [ -n "$NAT_NETWORK_UUID" ]; then
             "$(vm_set networkref "\"$TEST_NAT_NETWORK_NAME\"" | python3 -c "
 import sys, json; d = json.load(sys.stdin); d['macaddr'] = ''; print(json.dumps(d))")"
 
+        # Another VM's reservation on this VM's preferred (name-hashed)
+        # address — the formula must match omv-microvm-run. The VM must
+        # then get a different address rather than a duplicate.
+        PREFERRED_IP=$(python3 -c "
+import ipaddress, sys
+n = ipaddress.ip_network(sys.argv[1])
+print(n.network_address + (int(sys.argv[2]) % (n.num_addresses - 3)) + 2)
+" "$TEST_NAT_SUBNET" "$(echo -n omvtest_microvm | cksum | cut -d' ' -f1)")
+        mkdir -p "$NAT_IPS_DIR"
+        rm -f "${NAT_IPS_DIR}/omvtest_microvm"
+        echo "$PREFERRED_IP" > "${NAT_IPS_DIR}/omvtest_squatter"
+
         assert_rpc "doCommand start (on DHCP network)" "MicroVm" "doCommand" \
             "{\"uuid\":\"$VM_UUID\",\"command\":\"start\"}"
         wait_for_state running 60 || true
@@ -1209,6 +1264,16 @@ import sys, json; d = json.load(sys.stdin); d['macaddr'] = ''; print(json.dumps(
             _fail "VM runs with the derived MAC" "$(echo "$FC_VM_CONFIG" | jq -c '."network-interfaces"' 2>&1)"
         fi
         RESERVED_IP=$(echo "$HOSTS_LINE" | cut -d, -f2)
+        if [ -n "$RESERVED_IP" ] && [ "$RESERVED_IP" != "$PREFERRED_IP" ]; then
+            _pass "VM avoids an address another VM has reserved ($PREFERRED_IP -> $RESERVED_IP)"
+        else
+            _fail "VM avoids an address another VM has reserved" "preferred=$PREFERRED_IP got='$RESERVED_IP'"
+        fi
+        if [ "$(cat "${NAT_IPS_DIR}/omvtest_microvm" 2>/dev/null)" = "$RESERVED_IP" ]; then
+            _pass "VM's address reservation recorded"
+        else
+            _fail "VM's address reservation recorded" "file=$(cat "${NAT_IPS_DIR}/omvtest_microvm" 2>&1)"
+        fi
         if echo "$FC_VM_CONFIG" | jq -r '."boot-source".boot_args' 2>/dev/null \
             | grep -qF "ip=${RESERVED_IP}::${TEST_NAT_GATEWAY}:"; then
             _pass "Kernel ip= address matches the DHCP reservation"
@@ -1248,8 +1313,16 @@ import sys, json; d = json.load(sys.stdin); d['macaddr'] = ''; print(json.dumps(
             _fail "Turning DHCP on starts the server for a network that is up" "$DHCP_UNIT not active"
         fi
 
+        assert_rpc_fails "setNetwork (subnet change refused while a VM on it runs)" "MicroVm" "setNetwork" \
+            "$(nat_params "$NAT_NETWORK_UUID" True "$TEST_NAT_SUBNET2")"
+
         omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
         wait_for_state stopped 60 || true
+        if [ "$(cat "${NAT_IPS_DIR}/omvtest_microvm" 2>/dev/null)" = "$RESERVED_IP" ]; then
+            _pass "Address reservation outlives the VM's run"
+        else
+            _fail "Address reservation outlives the VM's run" "file=$(cat "${NAT_IPS_DIR}/omvtest_microvm" 2>&1)"
+        fi
         assert_rpc "setVm (back to the test bridge network)" "MicroVm" "setVm" \
             "$(vm_set networkref "\"$TEST_NETWORK_NAME\"")"
     else
@@ -1258,13 +1331,49 @@ import sys, json; d = json.load(sys.stdin); d['macaddr'] = ''; print(json.dumps(
             "VM runs with the derived MAC" "Kernel ip= address matches the DHCP reservation" \
             "Kernel ip= names the gateway as DNS server" "dnsmasq answers DNS on the gateway address" \
             "dnsmasq serves DHCP on the NAT bridge only" "Turning DHCP off stops the server" \
-            "Turning DHCP on starts the server for a network that is up" "setVm (back to the test bridge network)"; do
+            "Turning DHCP on starts the server for a network that is up" "setVm (back to the test bridge network)" \
+            "VM avoids an address another VM has reserved" "VM's address reservation recorded" \
+            "setNetwork (subnet change refused while a VM on it runs)" "Address reservation outlives the VM's run"; do
             _skip "$t" "no vm uuid or real image"
         done
     fi
 
+    # The bridge address and NAT rules are only ever created once, so a
+    # subnet change has to tear them down for the next start to rebuild.
+    if omv-microvm-ensure-nat-network "$TEST_NAT_NETWORK_NAME" "$TEST_NAT_SUBNET" >/dev/null 2>&1; then
+        assert_rpc "setNetwork (change subnet, no VM running)" "MicroVm" "setNetwork" \
+            "$(nat_params "$NAT_NETWORK_UUID" True "$TEST_NAT_SUBNET2")"
+        if ! ip link show "$TEST_NAT_BRIDGE" >/dev/null 2>&1 \
+            && ! nft list table ip mvm_nat 2>/dev/null | grep -qF "\"${NAT_RULE_TAG}\""; then
+            _pass "Changing the subnet tears down the old bridge and NAT rules"
+        else
+            _fail "Changing the subnet tears down the old bridge and NAT rules" \
+                "$(ip -br addr show dev "$TEST_NAT_BRIDGE" 2>&1); $(nft list table ip mvm_nat 2>&1 | grep -F "$NAT_RULE_TAG")"
+        fi
+        omv-microvm-ensure-nat-network "$TEST_NAT_NETWORK_NAME" "$TEST_NAT_SUBNET2" >/dev/null 2>&1
+        if nft list chain ip mvm_nat postrouting 2>/dev/null | grep -F "\"${NAT_RULE_TAG}\"" \
+                | grep -qF "ip saddr ${TEST_NAT_SUBNET2} " \
+            && ip -4 addr show dev "$TEST_NAT_BRIDGE" 2>/dev/null | grep -q " ${TEST_NAT_GATEWAY2}/" \
+            && ! ip -4 addr show dev "$TEST_NAT_BRIDGE" 2>/dev/null | grep -q " ${TEST_NAT_GATEWAY}/"; then
+            _pass "NAT is rebuilt for the new subnet only"
+        else
+            _fail "NAT is rebuilt for the new subnet only" \
+                "$(ip -br addr show dev "$TEST_NAT_BRIDGE" 2>&1); $(nft list chain ip mvm_nat postrouting 2>&1 | grep -F "$NAT_RULE_TAG")"
+        fi
+    else
+        _skip "setNetwork (change subnet, no VM running)" "could not bring the NAT network up"
+        _skip "Changing the subnet tears down the old bridge and NAT rules" "could not bring the NAT network up"
+        _skip "NAT is rebuilt for the new subnet only" "could not bring the NAT network up"
+    fi
+
+    mkdir -p "$NAT_IPS_DIR" && echo "${TEST_NAT_SUBNET2%.*/*}.9" > "${NAT_IPS_DIR}/omvtest_squatter"
     assert_rpc "deleteNetwork (NAT with DHCP)" "MicroVm" "deleteNetwork" "{\"uuid\":\"$NAT_NETWORK_UUID\"}"
     NAT_NETWORK_UUID=""
+    if [ ! -e "$NAT_IPS_DIR" ]; then
+        _pass "deleteNetwork removes its address reservations"
+    else
+        _fail "deleteNetwork removes its address reservations" "$(ls "$NAT_IPS_DIR" 2>&1)"
+    fi
     if ! unit_active && [ ! -e "$DHCP_DIR" ] && ! ip link show "$TEST_NAT_BRIDGE" >/dev/null 2>&1; then
         _pass "deleteNetwork stops DHCP and removes its state and bridge"
     else
@@ -1440,6 +1549,56 @@ if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
 else
     _skip "real backup/restore round trip" "no vm uuid or no downloaded image"
 fi
+
+# A warm backup's device state names its own VM's disk files and TAP, so
+# restoring one onto a different VM must ignore it and cold boot. This
+# fabricated "warm" backup of another VM has unloadable state: the VM only
+# comes up if it was ignored.
+if [ -n "$VM_UUID" ] && [ -n "$REAL_IMAGE_REF" ]; then
+    omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+    wait_for_state stopped 60 || true
+    VM_RESTORE_MARKER="${SF_PATH%/}/vms/omvtest_microvm/.restore_from"
+
+    XVM_DATE="2020-01-01_00-00-00"
+    XVM_DIR="${BACKUP_TEST_DIR}/omvtest_othervm/${XVM_DATE}"
+    mkdir -p "$XVM_DIR"
+    cp --reflink=auto "${SF_PATH%/}/vms/omvtest_microvm/rootfs.ext4" "${XVM_DIR}/rootfs.ext4"
+    echo "not a real vmstate" > "${XVM_DIR}/vmstate"
+    echo "not a real memfile" > "${XVM_DIR}/memfile"
+    XVM_OUT=$(omv-rpc -u admin "MicroVm" "restoreBackup" \
+        "{\"vmuuid\":\"$VM_UUID\",\"path\":\"$BACKUP_TEST_DIR\",\"vmname\":\"omvtest_othervm\",\"date\":\"$XVM_DATE\"}" 2>&1)
+    if BG_RESULT=$(wait_bg "$XVM_OUT" 60); then
+        _pass "restoreBackup (another VM's warm backup)"
+    else
+        _fail "restoreBackup (another VM's warm backup)" "$(echo "$BG_RESULT" | tail -5)"
+    fi
+    if [ ! -e "$VM_RESTORE_MARKER" ] && wait_for_state running 60; then
+        _pass "Another VM's warm backup is restored cold"
+    else
+        _fail "Another VM's warm backup is restored cold" \
+            "state=$(vm_state) marker=$(cat "$VM_RESTORE_MARKER" 2>&1)"
+    fi
+    omv-rpc -u admin "MicroVm" "doCommand" "{\"uuid\":\"$VM_UUID\",\"command\":\"stop\"}" >/dev/null 2>&1 || true
+    wait_for_state stopped 60 || true
+
+    # A marker left by an earlier failed warm load must not survive a cold
+    # restore, or the next start would wait for a snapshot load.
+    COLD_DIR="${BACKUP_TEST_DIR}/omvtest_cold"
+    mkdir -p "$COLD_DIR"
+    cp --reflink=auto "${SF_PATH%/}/vms/omvtest_microvm/rootfs.ext4" "${COLD_DIR}/rootfs.ext4"
+    echo "/nonexistent" > "$VM_RESTORE_MARKER"
+    if omv-microvm-snapshot-restore omvtest_microvm "$COLD_DIR" >/dev/null 2>&1 \
+        && [ ! -e "$VM_RESTORE_MARKER" ]; then
+        _pass "Cold restore removes a stale warm-restore marker"
+    else
+        _fail "Cold restore removes a stale warm-restore marker" "marker=$(cat "$VM_RESTORE_MARKER" 2>&1)"
+    fi
+    rm -f "$VM_RESTORE_MARKER"
+else
+    _skip "restoreBackup (another VM's warm backup)" "no vm uuid or no downloaded image"
+    _skip "Another VM's warm backup is restored cold" "no vm uuid or no downloaded image"
+    _skip "Cold restore removes a stale warm-restore marker" "no vm uuid or no downloaded image"
+fi
 rm -rf "$BACKUP_TEST_DIR"
 
 # getBackupList/deleteBackup are driven by the flat list file plus whatever
@@ -1562,6 +1721,62 @@ else
     _skip "setJob (update)" "no job uuid"
     _skip "deleteJob" "no job uuid"
 fi
+
+# The job ends up in a root crontab line: quotes in the path and comment
+# must survive the shell, and "%" (a newline to cron) must be escaped.
+CRON_FILE=/etc/cron.d/omv-microvm-backup
+TRICKY_PATH="/tmp/omvtest it's 100%"
+TRICKY_COMMENT='omvtest "quoted" 50%'
+TRICKY_JOB_PARAMS=$(echo "$JOB_PARAMS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['path'] = sys.argv[1]
+d['comment'] = sys.argv[2]
+d['sendemail'] = True
+print(json.dumps(d))
+" "$TRICKY_PATH" "$TRICKY_COMMENT")
+assert_rpc "setJob (quotes and % in path and comment)" "MicroVm" "setJob" "$TRICKY_JOB_PARAMS"
+JOB_UUID=$(json_uuid "$RPC_OUT")
+if [ -n "$JOB_UUID" ]; then
+    CRON_LINE=$(grep -F "omvtest it" "$CRON_FILE" 2>/dev/null | head -1)
+    if [ -z "$CRON_LINE" ]; then
+        omv-salt deploy run --quiet microvm >/dev/null 2>&1 || true
+        CRON_LINE=$(grep -F "omvtest it" "$CRON_FILE" 2>/dev/null | head -1)
+    fi
+    # Applies cron's own "%" handling, then parses it like the shell does.
+    CRON_CHECK=$(python3 - "$CRON_LINE" "$TRICKY_PATH" "$TRICKY_COMMENT" <<'PY' 2>&1
+import shlex, sys
+line, path, comment = sys.argv[1:4]
+cmd = line.split(None, 2)[2]
+out, i = '', 0
+while i < len(cmd):
+    if cmd[i] == '\\' and cmd[i + 1:i + 2] == '%':
+        out += '%'; i += 2; continue
+    if cmd[i] == '%':
+        break
+    out += cmd[i]; i += 1
+args = shlex.split(out)
+ok = args[args.index('-d') + 1] == path and args[args.index('-C') + 1] == comment
+print('ok' if ok else repr(args))
+PY
+)
+    if [ "$CRON_CHECK" = "ok" ]; then
+        _pass "Cron line passes the path and comment through intact"
+    else
+        _fail "Cron line passes the path and comment through intact" "line='${CRON_LINE}' parsed=${CRON_CHECK}"
+    fi
+    omv-rpc -u admin "MicroVm" "deleteJob" "{\"uuid\":\"$JOB_UUID\"}" >/dev/null 2>&1 || true
+    JOB_UUID=""
+else
+    _skip "Cron line passes the path and comment through intact" "no job uuid"
+fi
+
+assert_rpc_fails "setJob (line break in path)" "MicroVm" "setJob" "$(echo "$JOB_PARAMS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['path'] = '/tmp/a\n* * * * * root touch /tmp/omvtest-injected'
+print(json.dumps(d))
+")"
 
 assert_rpc_fails "setJob (missing execution)" "MicroVm" "setJob" "$(python3 -c "
 import json
