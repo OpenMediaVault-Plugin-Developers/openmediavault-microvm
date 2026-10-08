@@ -376,6 +376,7 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $db = \OMV\Config\Database::getInstance();
         $object = new \OMV\Config\ConfigObject("conf.service.microvm.network");
         $object->setAssoc($params);
+        $teardownNat = FALSE;
         if (TRUE === $object->isNew()) {
             $db->assertIsUnique($object, "name");
         } else {
@@ -386,11 +387,42 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                     "The name can only be set when a network is created. Delete and recreate the network to use a different name."
                 ));
             }
+            // The bridge address and NAT rules are only created once (see
+            // omv-microvm-ensure-nat-network), so a changed subnet or type
+            // means tearing them down for the next VM start to rebuild.
+            $teardownNat = ('nat' === $existing->get('type')) &&
+                ($existing->get('type') !== $object->get('type') ||
+                $existing->get('subnet') !== $object->get('subnet'));
+            if (TRUE === $teardownNat) {
+                $this->assertNoVmRunningOnNetwork($existing->get('name'));
+            }
         }
         $db->set($object);
+        if (TRUE === $teardownNat) {
+            $cmd = new \OMV\System\Process('omv-microvm-teardown-nat-network',
+                [$object->get('name')]);
+            $cmd->setQuiet(true);
+            $cmd->execute();
+        }
         $this->syncDhcpServer($object);
         $this->applyChanges($context);
         return $object->getAssoc();
+    }
+
+    private function assertNoVmRunningOnNetwork($networkName)
+    {
+        $db = \OMV\Config\Database::getInstance();
+        foreach ($db->get("conf.service.microvm.vm") as $vm) {
+            if ($vm->get('networkref') !== $networkName) {
+                continue;
+            }
+            $state = $this->getActiveState($vm->get('name'));
+            if (!in_array($state, ['stopped', 'error'], true)) {
+                throw new \OMV\Exception(sprintf(
+                    gettext("VM '%s' on network '%s' is %s; stop it before changing the network's type or subnet."),
+                    $vm->get('name'), $networkName, $state));
+            }
+        }
     }
 
     // The DHCP server is started by the first VM that starts on a network
@@ -649,9 +681,15 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
                 $this->systemctlQuiet(['kill', '--signal=SIGKILL', $unit]);
                 $this->systemctlQuiet(['stop', $unit]);
                 $this->systemctlQuiet(['disable', $unit]);
+                // The SIGKILL leaves the unit failed; don't keep it listed.
+                $this->systemctlQuiet(['reset-failed', $unit]);
                 // Its DHCP reservation, if it's on a DHCP network (see
                 // omv-microvm-run).
                 foreach (glob(sprintf('/run/openmediavault-microvm-dhcp/*/hosts/%s', $name)) as $f) {
+                    @unlink($f);
+                }
+                // Its NAT address reservation (see omv-microvm-run).
+                foreach (glob(sprintf('/var/lib/openmediavault-microvm/nat-ips/*/%s', $name)) as $f) {
                     @unlink($f);
                 }
                 // Data disks go with the VM, wherever they're stored.
@@ -694,7 +732,8 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
         $name = $vm->get('name');
         $state = $this->getActiveState($name);
-        if ($state !== 'stopped') {
+        // 'error' too: a force-stopped VM's unit ends up failed.
+        if (!in_array($state, ['stopped', 'error'], true)) {
             throw new \OMV\Exception(sprintf(
                 gettext("VM '%s' is %s; it must be stopped before its disk can be resized."), $name, $state));
         }
@@ -1117,7 +1156,9 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $vm = $db->get("conf.service.microvm.vm", $params['vmuuid']);
         $name = $vm->get('name');
         $state = $this->getActiveState($name);
-        if (!in_array($state, ['running', 'stopped'], true)) {
+        // 'error' is a stopped VM too (e.g. force-stopped), so it gets a
+        // cold snapshot.
+        if (!in_array($state, ['running', 'stopped', 'error'], true)) {
             throw new \OMV\Exception(sprintf(
                 gettext("VM '%s' is %s; must be running or stopped to take a snapshot."), $name, $state));
         }
@@ -1322,11 +1363,17 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         if (!is_dir($backupDir)) {
             throw new \OMV\Exception(gettext("Backup not found."));
         }
+        $restoreArgs = [$name, $backupDir];
+        // A warm backup's device state names its own VM's disk files and
+        // TAP device, so onto any other VM it can only be restored cold.
+        if ($params['vmname'] !== $name) {
+            $restoreArgs[] = '--cold';
+        }
 
         return $this->execBgProc(function ($bgStatusFilename, $bgOutputFilename)
-            use ($unit, $name, $backupDir) {
+            use ($unit, $restoreArgs) {
                 $this->systemctlQuiet(['stop', $unit]);
-                $cmd = new \OMV\System\Process('/usr/sbin/omv-microvm-snapshot-restore', [$name, $backupDir]);
+                $cmd = new \OMV\System\Process('/usr/sbin/omv-microvm-snapshot-restore', $restoreArgs);
                 $cmd->setRedirect2to1();
                 $cmdLine = $cmd->getCommandLine();
                 if (0 !== $this->exec($cmdLine, $output, $bgOutputFilename)) {
@@ -1397,6 +1444,10 @@ class OMVRpcServiceMicroVm extends \OMV\Rpc\ServiceAbstract
         $object = new \OMV\Config\ConfigObject("conf.service.microvm.job");
         if (substr($params['path'], 0, 1) !== '/') {
             $params['path'] = '/' . $params['path'];
+        }
+        // The job becomes a single cron line (see backup-jobs.j2).
+        if (1 === preg_match('/[\r\n]/', $params['path'] . $params['vmname'])) {
+            throw new \OMV\Exception(gettext("The VM name and path must not contain line breaks."));
         }
         $object->setAssoc($params);
         $db->set($object);

@@ -19,6 +19,8 @@ RULE_TAG="mvm-net:${NETNAME}"
 
 systemctl stop "omv-microvm-dhcp@${NETNAME}.service" 2>/dev/null || true
 rm -rf "/run/openmediavault-microvm-dhcp/${NETNAME}"
+# Its VMs' address reservations (see omv-microvm-run).
+rm -rf "/var/lib/openmediavault-microvm/nat-ips/${NETNAME}"
 
 for chain in postrouting forward; do
     handles=$(nft -a list chain ip mvm_nat "$chain" 2>/dev/null \

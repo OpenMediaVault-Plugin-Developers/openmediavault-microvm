@@ -161,7 +161,7 @@ data:
                     service: MicroVm
                     get:
                       method: enumerateVmNames
-                hint: _("The target VM's current disk is overwritten with this backup's saved disk. Defaults to the VM the backup was taken from.")
+                hint: _("The target VM's current disk is overwritten with this backup's saved disk. Onto a VM other than the one the backup was taken from, the saved memory state is not used and the VM cold boots.")
                 value: ""
                 validators:
                   required: true
@@ -184,7 +184,7 @@ data:
                           date: "{{ date }}"
         confirmationDialogConfig:
           template: confirmation-danger
-          message: _("Restoring stops the target VM, permanently overwrites its current disk with this backup's saved disk, and boots from the backup's saved memory state if it has one. Any changes made since the backup was taken will be lost. Continue?")
+          message: _("Restoring stops the target VM, permanently overwrites its current disk with this backup's saved disk, and boots from the backup's saved memory state if it has one (only when restoring onto the VM the backup was taken from). Any changes made since the backup was taken will be lost. Continue?")
       - type: iconButton
         tooltip: _("Sync backup list")
         icon: mdi:auto-fix

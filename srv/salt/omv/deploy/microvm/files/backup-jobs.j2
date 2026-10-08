@@ -1,4 +1,9 @@
 {%- set separator = ' ' -%}
+{#- Single-quotes a value for the shell, and escapes "%", which cron would
+    otherwise turn into a newline (cron drops the backslash again). -#}
+{%- macro shquote(value) -%}
+'{{ value | string | replace("'", "'\\''") | replace('%', '\\%') }}'
+{%- endmacro -%}
 {{ pillar['headers']['multiline'] -}}
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
@@ -16,5 +21,5 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 {%- if job.keep > 0 -%}
 {%- set keep = ' -k ' ~ job.keep -%}
 {%- endif -%}
-{{ separator }}root omv-microvm-backup -v {{ job.vmname }} -d '{{ job.path }}'{{ keep }}{{ ' -e onerror' if job.sendemail | to_bool and job.emailonerror | to_bool else (' -e always' if job.sendemail | to_bool else '') }}{{ (' -C "' ~ job.comment | replace('\n', ' ') ~ '"') if job.sendemail | to_bool and job.comment | length > 0 else '' }}{{ separator }}>/dev/null 2>&1
+{{ separator }}root omv-microvm-backup -v {{ shquote(job.vmname) }} -d {{ shquote(job.path) }}{{ keep }}{{ ' -e onerror' if job.sendemail | to_bool and job.emailonerror | to_bool else (' -e always' if job.sendemail | to_bool else '') }}{{ (' -C ' ~ shquote(job.comment | replace('\r', ' ') | replace('\n', ' '))) if job.sendemail | to_bool and job.comment | length > 0 else '' }}{{ separator }}>/dev/null 2>&1
 {%- endfor -%}

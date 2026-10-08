@@ -10,7 +10,18 @@ remove_action() {
     rm -f /etc/systemd/system/omv-microvm@.service
     rm -f /etc/systemd/system/omv-microvm-dhcp@.service
     rm -f /etc/logrotate.d/openmediavault-microvm
+    rm -f /etc/logrotate.d/omv-microvm-backup
+    # Scheduled backups would otherwise keep firing a removed script.
+    rm -f /etc/cron.d/omv-microvm-backup
     systemctl daemon-reload 2>/dev/null || true
+    # Private NAT networks' bridges and rules (see
+    # omv-microvm-ensure-nat-network); their DHCP servers were stopped by
+    # prerm.
+    for bridge in $(ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | grep '^mvm-nat-'); do
+        ip link del "${bridge}" 2>/dev/null || true
+    done
+    nft delete table ip mvm_nat 2>/dev/null || true
+    rm -rf /run/openmediavault-microvm /run/openmediavault-microvm-dhcp
     # Activate trigger to purge cached files.
     dpkg-trigger update-workbench
 }
@@ -19,7 +30,12 @@ case "$1" in
     purge)
         remove_action
         omv_config_delete "/config/services/microvm"
-        rm -rf /var/lib/openmediavault/microvm
+        # Jailer chroots (unmounted when prerm stopped the VMs) and NAT
+        # address reservations. --one-file-system: don't descend into a
+        # leftover bind mount of VM storage on another filesystem.
+        rm -rf --one-file-system /var/lib/openmediavault-microvm
+        rm -f /etc/omv-microvm-backup.list /etc/omv-microvm-backup.list.bak
+        rm -f /var/log/omv-microvm-backup.log*
         rm -f /var/log/openmediavault-microvm.log*
     ;;
 

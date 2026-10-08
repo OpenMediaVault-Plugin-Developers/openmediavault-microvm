@@ -4,7 +4,12 @@
 # saved disk, and mark it for a warm (memory-state) boot if the snapshot
 # has one. Called after the VM's unit is stopped; does not start it back up.
 #
-# Usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>
+# --cold restores the disks only, ignoring any memory/device state. Needed
+# when restoring onto a different VM than the snapshot was taken from: the
+# saved device state names that VM's own disk files and TAP device, so
+# loading it would attach the other VM's disks.
+#
+# Usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir> [--cold]
 
 set -eu
 
@@ -12,6 +17,8 @@ set -eu
 
 VMNAME="${1:?usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>}"
 SNAPSHOT_DIR="${2:?usage: omv-microvm-snapshot-restore <vm-name> <snapshot-dir>}"
+FORCE_COLD=0
+[ "${3:-}" = "--cold" ] && FORCE_COLD=1
 
 _log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${VMNAME}: $*"
@@ -35,6 +42,10 @@ mkdir -p "$VM_DIR"
 WARM=0
 if [ -f "${SNAPSHOT_DIR}/vmstate" ] && [ -f "${SNAPSHOT_DIR}/memfile" ]; then
     WARM=1
+    if [ "$FORCE_COLD" -eq 1 ]; then
+        _log "Restoring onto a different VM — skipping the saved memory state; the VM will cold boot."
+        WARM=0
+    fi
 fi
 
 # A warm snapshot's device state holds the drive paths Firecracker saw:
@@ -91,8 +102,12 @@ done
 # Only warm snapshots (with memory/device state) need the next start to
 # load them over the API — a cold snapshot is just a disk, so a normal
 # cold boot afterward is already correct.
+# A stale marker (e.g. from an earlier failed warm load) would otherwise
+# make a cold restore's next start wait for a snapshot load.
 if [ "$WARM" -eq 1 ]; then
     printf '%s' "$SNAPSHOT_DIR" > "${VM_DIR}/.restore_from"
+else
+    rm -f "${VM_DIR}/.restore_from"
 fi
 
 _log "Ready to restore from ${SNAPSHOT_DIR}."

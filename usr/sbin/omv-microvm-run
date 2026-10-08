@@ -143,8 +143,9 @@ if [ "$NET_TYPE" = "nat" ]; then
     # Firecracker guests get no DHCP server on a private NAT network, so
     # each VM's address is handed to the kernel directly via the "ip="
     # boot parameter (standard Linux IP autoconfiguration — no in-guest
-    # DHCP client required). The offset is a deterministic hash of the VM
-    # name, the same approach used for TAP_NAME above.
+    # DHCP client required). The preferred offset is a deterministic hash
+    # of the VM name, the same approach used for TAP_NAME above; another
+    # VM's reservation on that address bumps it to the next free one.
     NET_ADDR="${SUBNET%/*}"
     PREFIX="${SUBNET#*/}"
     _ip_to_int() { local a b c d; IFS=. read -r a b c d <<< "$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
@@ -157,8 +158,54 @@ if [ "$NET_TYPE" = "nat" ]; then
     GATEWAY_IP=$(_int_to_ip "$((NET_INT + 1))")
     USABLE_HOSTS=$(( (1 << HOST_BITS) - 3 ))
     HASH=$(echo -n "$VMNAME" | cksum | cut -d' ' -f1)
-    OFFSET=$(( (HASH % USABLE_HOSTS) + 2 ))
-    GUEST_IP=$(_int_to_ip "$((NET_INT + OFFSET))")
+
+    # Each VM's address is reserved in a file that outlives the VM's run,
+    # so two VMs never share one and a VM keeps its address across boots.
+    # Removed with the VM (doCommand delete) or the network
+    # (omv-microvm-teardown-nat-network).
+    NAT_IPS_BASE="/var/lib/openmediavault-microvm/nat-ips"
+    NAT_IPS_DIR="${NAT_IPS_BASE}/${NETWORKREF}"
+    OWN_IP_FILE="${NAT_IPS_DIR}/${VMNAME}"
+    mkdir -p "$NAT_IPS_DIR"
+    # Serialises allocation between VMs starting at the same time.
+    exec 9> "${NAT_IPS_BASE}/.lock"
+    flock 9
+    # Its reservation on a network it was on before.
+    for f in "$NAT_IPS_BASE"/*/"$VMNAME"; do
+        [ "$f" = "$OWN_IP_FILE" ] || rm -f "$f"
+    done
+    declare -A TAKEN_IPS=()
+    for f in "$NAT_IPS_DIR"/*; do
+        [ -f "$f" ] && [ "$f" != "$OWN_IP_FILE" ] || continue
+        TAKEN_IPS["$(cat "$f")"]=1
+    done
+    # Usable offsets are 2 .. USABLE_HOSTS+1 (.1 is the gateway).
+    _ip_offset_free() {
+        [ "$1" -ge 2 ] && [ "$1" -le $((USABLE_HOSTS + 1)) ] \
+            && [ -z "${TAKEN_IPS[$(_int_to_ip "$((NET_INT + $1))")]:-}" ]
+    }
+    GUEST_IP=""
+    if [ -f "$OWN_IP_FILE" ]; then
+        PREV_IP=$(cat "$OWN_IP_FILE")
+        if [[ "$PREV_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            && _ip_offset_free "$(( $(_ip_to_int "$PREV_IP") - NET_INT ))"; then
+            GUEST_IP="$PREV_IP"
+        fi
+    fi
+    if [ -z "$GUEST_IP" ]; then
+        for i in $(seq 0 $((USABLE_HOSTS - 1))); do
+            OFFSET=$(( ((HASH + i) % USABLE_HOSTS) + 2 ))
+            if _ip_offset_free "$OFFSET"; then
+                GUEST_IP=$(_int_to_ip "$((NET_INT + OFFSET))")
+                [ "$i" -eq 0 ] || _log "WARNING: preferred address taken by another VM; using ${GUEST_IP}."
+                break
+            fi
+        done
+    fi
+    [ -n "$GUEST_IP" ] || die "No free address left in subnet '${SUBNET}'."
+    printf '%s\n' "$GUEST_IP" > "$OWN_IP_FILE"
+    flock -u 9
+    exec 9>&-
 
     # This VM's reservation, if it was on a DHCP network last time.
     rm -f /run/openmediavault-microvm-dhcp/*/hosts/"${VMNAME}"
@@ -186,7 +233,8 @@ if [ "$NET_TYPE" = "nat" ]; then
         _log "Private NAT network '${NETWORKREF}': guest ${GUEST_IP}, gateway ${GATEWAY_IP}, bridge ${BRIDGE}."
     fi
 else
-    rm -f /run/openmediavault-microvm-dhcp/*/hosts/"${VMNAME}"
+    rm -f /run/openmediavault-microvm-dhcp/*/hosts/"${VMNAME}" \
+        /var/lib/openmediavault-microvm/nat-ips/*/"${VMNAME}"
     BRIDGE=$(omv_config_get "${NETWORK_XPATH}/bridge")
     [ -n "$BRIDGE" ] || die "Network '${NETWORKREF}' has no bridge device configured."
 fi
