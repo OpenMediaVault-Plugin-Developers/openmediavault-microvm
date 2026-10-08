@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: openmediavault-microvm\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-20 16:38+0000\n"
+"POT-Creation-Date: 2026-10-08 20:49+0000\n"
 "PO-Revision-Date: 2026-09-18 16:05+0000\n"
 "Language-Team: Polish (https://app.transifex.com/openmediavault-plugin-developers/teams/1854/pl/)\n"
 "MIME-Version: 1.0\n"
@@ -16,6 +16,9 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language: pl\n"
 "Plural-Forms: nplurals=4; plural=(n==1 ? 0 : (n%10>=2 && n%10<=4) && (n%100<12 || n%100>14) ? 1 : n!=1 && (n%10>=0 && n%10<=1) || (n%10>=5 && n%10<=9) || (n%100>=12 && n%100<=14) ? 2 : 3);\n"
+
+msgid "'rootfs' is reserved and can't be used as a disk name."
+msgstr ""
 
 msgid "(no console output yet)"
 msgstr ""
@@ -39,8 +42,12 @@ msgstr ""
 msgid "All snapshots have been deleted."
 msgstr ""
 
+msgid "Also delete the disk image"
+msgstr ""
+
 msgid ""
-"Also used as the systemd instance name and to derive the TAP device name."
+"Also used as the systemd instance name and to derive the TAP device name. "
+"Fixed once the VM is created."
 msgstr ""
 
 msgid "An image '%s' already exists."
@@ -57,10 +64,14 @@ msgstr ""
 
 msgid ""
 "Are you sure you want to delete this VM? Its working directory (writable "
-"rootfs copy) will also be removed."
+"rootfs copy) and all of its data disks, including those stored on other "
+"shared folders, will also be removed."
 msgstr ""
 
 msgid "Are you sure you want to delete this backup?"
+msgstr ""
+
+msgid "Are you sure you want to remove this disk from its VM?"
 msgstr ""
 
 msgid "AutoStart"
@@ -123,10 +134,18 @@ msgstr ""
 msgid "Created VM."
 msgstr ""
 
+msgid "Created disk."
+msgstr ""
+
 msgid "Created network."
 msgstr ""
 
 msgid "Created scheduled backup job."
+msgstr ""
+
+msgid ""
+"Created sparse, so it only takes up space as the guest writes to it. Use "
+"Resize on the Disks tab to grow an existing disk."
 msgstr ""
 
 msgid "Creating snapshot ..."
@@ -136,6 +155,9 @@ msgid "Current size (MiB)"
 msgstr ""
 
 msgid "DHCP"
+msgstr ""
+
+msgid "Data disks"
 msgstr ""
 
 msgid "Date"
@@ -148,6 +170,9 @@ msgid "Delete"
 msgstr ""
 
 msgid "Delete All"
+msgstr ""
+
+msgid "Delete disk ..."
 msgstr ""
 
 msgid "Delete snapshot ..."
@@ -183,6 +208,12 @@ msgstr ""
 msgid "Disk (MiB)"
 msgstr ""
 
+msgid "Disk image '%s' is missing."
+msgstr ""
+
+msgid "Disks"
+msgstr ""
+
 msgid "Download"
 msgstr ""
 
@@ -210,6 +241,9 @@ msgstr ""
 msgid "Edit VM."
 msgstr ""
 
+msgid "Edit disk."
+msgstr ""
+
 msgid "Edit network."
 msgstr ""
 
@@ -231,6 +265,12 @@ msgstr ""
 msgid "Executing scheduled backup ..."
 msgstr ""
 
+msgid "Failed to create directory '%s'."
+msgstr ""
+
+msgid "Failed to create filesystem."
+msgstr ""
+
 msgid "Failed to force stop VM."
 msgstr ""
 
@@ -246,7 +286,21 @@ msgstr ""
 msgid "Failed to stop VM."
 msgstr ""
 
+msgid "Filesystem"
+msgstr ""
+
 msgid "Firecracker"
+msgstr ""
+
+msgid "Fixed once the disk is created."
+msgstr ""
+
+msgid ""
+"Fixed once the disk is created. A new disk is attached the next time the VM "
+"starts."
+msgstr ""
+
+msgid "Fixed once the network is created."
 msgstr ""
 
 msgid "Force stop"
@@ -268,6 +322,12 @@ msgid ""
 "reachable from the LAN."
 msgstr ""
 
+msgid ""
+"How long Stop and Restart wait for the guest to shut down cleanly (sent "
+"Ctrl+Alt+Del) before stopping it hard. 0 always stops hard. x86_64 hosts "
+"only; on aarch64 Stop is always hard. Force stop never waits."
+msgstr ""
+
 msgid "Image"
 msgstr ""
 
@@ -282,6 +342,9 @@ msgstr ""
 msgid "Imported"
 msgstr ""
 
+msgid "Include in snapshots and backups"
+msgstr ""
+
 msgid "Install cterm"
 msgstr ""
 
@@ -291,6 +354,9 @@ msgstr ""
 msgid ""
 "Installs the cterm plugin, which provides the web-based VM console/terminal "
 "link. Disable if you manage cterm yourself or don't want a console link."
+msgstr ""
+
+msgid "Jailer"
 msgstr ""
 
 msgid "Keep"
@@ -339,6 +405,12 @@ msgid ""
 "shrinks it. The VM must be stopped."
 msgstr ""
 
+msgid ""
+"Must be larger than the current size — this only grows the disk, it never "
+"shrinks it. The VM must be stopped. A disk without a filesystem only grows "
+"the image; extend the partition or filesystem from inside the guest."
+msgstr ""
+
 msgid "Name"
 msgstr ""
 
@@ -362,13 +434,22 @@ msgstr ""
 msgid "New size (MiB)"
 msgstr ""
 
+msgid "New size must be between 1 and 16777216 MiB."
+msgstr ""
+
 msgid "New size must be between 128 and 1048576 MiB."
+msgstr ""
+
+msgid "None (raw, formatted by the guest)"
 msgstr ""
 
 msgid "Not installed"
 msgstr ""
 
 msgid "Notes"
+msgstr ""
+
+msgid "Only letters, digits and underscores are allowed."
 msgstr ""
 
 msgid "Open live console"
@@ -385,6 +466,12 @@ msgstr ""
 msgid "Path"
 msgstr ""
 
+msgid ""
+"Permanently deletes the disk's data. Leave unchecked to only detach it from "
+"the VM; creating a disk with the same VM, name and storage later reattaches "
+"the kept image."
+msgstr ""
+
 msgid "Please set a shared folder for VM/image storage on the Settings tab."
 msgstr ""
 
@@ -396,13 +483,19 @@ msgid ""
 "another network or an existing host interface."
 msgstr ""
 
+msgid "Read-only"
+msgstr ""
+
 msgid "Resize"
 msgstr ""
 
-msgid "Resize disk"
+msgid "Resize disk ..."
 msgstr ""
 
-msgid "Resize disk ..."
+msgid "Resize root disk"
+msgstr ""
+
+msgid "Resize root disk ..."
 msgstr ""
 
 msgid "Resizing disk ..."
@@ -411,7 +504,7 @@ msgstr ""
 msgid "Restart"
 msgstr ""
 
-msgid "Restarted."
+msgid "Restart requested. The guest is asked to shut down first."
 msgstr ""
 
 msgid "Restarting ..."
@@ -445,8 +538,8 @@ msgstr ""
 msgid ""
 "Restoring stops the target VM, permanently overwrites its current disk with "
 "this backup's saved disk, and boots from the backup's saved memory state if "
-"it has one. Any changes made since the backup was taken will be lost. "
-"Continue?"
+"it has one (only when restoring onto the VM the backup was taken from). Any "
+"changes made since the backup was taken will be lost. Continue?"
 msgstr ""
 
 msgid "Rootfs URL"
@@ -461,7 +554,29 @@ msgstr ""
 msgid "Run DHCP for this network"
 msgstr ""
 
+msgid "Run in jailer"
+msgstr ""
+
+msgid ""
+"Runs Firecracker through its jailer — chrooted, as its own unprivileged "
+"user, with only this VM's kernel, disks and network device inside. The VM's "
+"disk images are handed over to that user, so their owner changes to a "
+"numeric uid. Can only be changed while the VM is stopped. Warm snapshots and"
+" backups only restore with the setting they were taken with."
+msgstr ""
+
+msgid ""
+"Runs a DHCP and DNS server on the network's gateway address. Each VM keeps "
+"the fixed address it is always given via its kernel command line; this also "
+"hands that same address, and the gateway as DNS server, to guests that run a"
+" DHCP client. VMs without a MAC address set get a fixed one derived from "
+"their name. Applies to VMs as they start."
+msgstr ""
+
 msgid "Schedule"
+msgstr ""
+
+msgid "Security"
 msgstr ""
 
 msgid "Select a VM ..."
@@ -476,7 +591,25 @@ msgstr ""
 msgid "Shared folder"
 msgstr ""
 
+msgid ""
+"Shared folder to store the disk image on. Leave empty to keep it with the VM"
+" on the VM storage shared folder. Fixed once the disk is created. If an "
+"image with this VM and disk name already exists there, it is reattached as-"
+"is."
+msgstr ""
+
+msgid ""
+"Shutdown requested. The VM stops once the guest has shut down, or after its "
+"shutdown timeout."
+msgstr ""
+
+msgid "Shutdown timeout (seconds)"
+msgstr ""
+
 msgid "Size"
+msgstr ""
+
+msgid "Size (MiB)"
 msgstr ""
 
 msgid "Snapshot"
@@ -503,9 +636,6 @@ msgstr ""
 msgid "Stop"
 msgstr ""
 
-msgid "Stopped."
-msgstr ""
-
 msgid "Stopping ..."
 msgstr ""
 
@@ -524,14 +654,36 @@ msgstr ""
 msgid "Syncing backup list ..."
 msgstr ""
 
+msgid "Takes effect the next time the VM starts."
+msgstr ""
+
+msgid "The VM name and path must not contain line breaks."
+msgstr ""
+
+msgid ""
+"The VM, name, storage location and filesystem can only be set when a disk is"
+" created."
+msgstr ""
+
 msgid ""
 "The image can only be set when a VM is created. Delete and recreate the VM "
 "to use a different image."
 msgstr ""
 
 msgid ""
+"The name can only be set when a VM is created. Delete and recreate the VM to"
+" use a different name."
+msgstr ""
+
+msgid ""
+"The name can only be set when a network is created. Delete and recreate the "
+"network to use a different name."
+msgstr ""
+
+msgid ""
 "The target VM's current disk is overwritten with this backup's saved disk. "
-"Defaults to the VM the backup was taken from."
+"Onto a VM other than the one the backup was taken from, the saved memory "
+"state is not used and the VM cold boots."
 msgstr ""
 
 msgid ""
@@ -540,13 +692,28 @@ msgid ""
 "kept as omv-microvm-backup.list.bak. Continue?"
 msgstr ""
 
+msgid ""
+"Turn off for large disks whose data is backed up some other way. An excluded"
+" disk is left as it is when a snapshot or backup is restored."
+msgstr ""
+
 msgid "Type"
 msgstr ""
 
 msgid "UUID"
 msgstr ""
 
+msgid ""
+"Up to 16 letters, digits or underscores. Fixed once the disk is created. "
+"Disks are attached in name order after the root disk (/dev/vdb, /dev/vdc, "
+"...); an ext4 disk is also labelled with its name, so the guest can mount it"
+" by LABEL."
+msgstr ""
+
 msgid "VM"
+msgstr ""
+
+msgid "VM '%s' already has a disk named '%s'."
 msgstr ""
 
 msgid "VM '%s' has never been started; there is no disk to resize yet."
@@ -555,7 +722,17 @@ msgstr ""
 msgid "VM '%s' has never been started; there is nothing to snapshot yet."
 msgstr ""
 
+msgid "VM '%s' is %s; it must be stopped before a disk can be removed."
+msgstr ""
+
 msgid "VM '%s' is %s; it must be stopped before its disk can be resized."
+msgstr ""
+
+msgid "VM '%s' is %s; it must be stopped before its disks can be resized."
+msgstr ""
+
+msgid ""
+"VM '%s' is %s; it must be stopped before the jailer setting can be changed."
 msgstr ""
 
 msgid "VM '%s' is %s; must be running or stopped to take a snapshot."
@@ -564,10 +741,18 @@ msgstr ""
 msgid "VM '%s' not found."
 msgstr ""
 
+msgid ""
+"VM '%s' on network '%s' is %s; stop it before changing the network's type or"
+" subnet."
+msgstr ""
+
 msgid "VM Name"
 msgstr ""
 
 msgid "VM name"
+msgstr ""
+
+msgid "VM state"
 msgstr ""
 
 msgid "VMs"
@@ -590,6 +775,9 @@ msgid ""
 msgstr ""
 
 msgid "aarch64"
+msgstr ""
+
+msgid "ext4"
 msgstr ""
 
 msgid "systemd unit status"

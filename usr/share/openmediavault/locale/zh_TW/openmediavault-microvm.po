@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: openmediavault-microvm\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-20 16:38+0000\n"
+"POT-Creation-Date: 2026-10-08 20:49+0000\n"
 "PO-Revision-Date: 2026-09-18 16:05+0000\n"
 "Last-Translator: kochin <kochinc@outlook.com>, 2026\n"
 "Language-Team: Chinese (Taiwan) (https://app.transifex.com/openmediavault-plugin-developers/teams/1854/zh_TW/)\n"
@@ -21,6 +21,9 @@ msgstr ""
 "Language: zh_TW\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+msgid "'rootfs' is reserved and can't be used as a disk name."
+msgstr ""
+
 msgid "(no console output yet)"
 msgstr "(控制台尚未有輸出)"
 
@@ -28,10 +31,10 @@ msgid "(unknown image)"
 msgstr "(未知映像)"
 
 msgid "A bridge device must be selected for a host bridge network."
-msgstr ""
+msgstr "必須為主機橋接網路選擇一個橋接裝置。"
 
 msgid "A subnet is required for a private NAT network."
-msgstr ""
+msgstr "私用 NAT 網路需要有個子網路。"
 
 msgid ""
 "A warm backup includes the VM's memory/device state, not just its disk."
@@ -43,9 +46,13 @@ msgstr "新增 VM"
 msgid "All snapshots have been deleted."
 msgstr "所有快照均已刪除。"
 
+msgid "Also delete the disk image"
+msgstr ""
+
 msgid ""
-"Also used as the systemd instance name and to derive the TAP device name."
-msgstr "將也作為 systemd 實例名稱，並用於導衍出 TAP 裝置名稱。"
+"Also used as the systemd instance name and to derive the TAP device name. "
+"Fixed once the VM is created."
+msgstr ""
 
 msgid "An image '%s' already exists."
 msgstr "映像 '%s' 已經存在。"
@@ -61,11 +68,15 @@ msgstr "您確定要刪除此 VM 的所有快照嗎？"
 
 msgid ""
 "Are you sure you want to delete this VM? Its working directory (writable "
-"rootfs copy) will also be removed."
-msgstr "您確定要刪除此 VM 嗎？它的工作目錄（可寫入根檔案系統副本）也將被刪除。"
+"rootfs copy) and all of its data disks, including those stored on other "
+"shared folders, will also be removed."
+msgstr ""
 
 msgid "Are you sure you want to delete this backup?"
 msgstr "您確定要刪除此備份嗎？"
+
+msgid "Are you sure you want to remove this disk from its VM?"
+msgstr ""
 
 msgid "AutoStart"
 msgstr "自動啟動"
@@ -127,11 +138,19 @@ msgstr "新建快照 ..."
 msgid "Created VM."
 msgstr "VM 已被建立。"
 
-msgid "Created network."
+msgid "Created disk."
 msgstr ""
+
+msgid "Created network."
+msgstr "已建立網路。"
 
 msgid "Created scheduled backup job."
 msgstr "預定備份工作已被建立。"
+
+msgid ""
+"Created sparse, so it only takes up space as the guest writes to it. Use "
+"Resize on the Disks tab to grow an existing disk."
+msgstr ""
 
 msgid "Creating snapshot ..."
 msgstr "建立快照中 ..."
@@ -140,6 +159,9 @@ msgid "Current size (MiB)"
 msgstr "目前大小 (MiB)"
 
 msgid "DHCP"
+msgstr "DHCP"
+
+msgid "Data disks"
 msgstr ""
 
 msgid "Date"
@@ -153,6 +175,9 @@ msgstr "刪除"
 
 msgid "Delete All"
 msgstr "刪除全部"
+
+msgid "Delete disk ..."
+msgstr ""
 
 msgid "Delete snapshot ..."
 msgstr "刪除快照 ..."
@@ -187,6 +212,12 @@ msgstr "停用自動啟動中 ..."
 msgid "Disk (MiB)"
 msgstr "磁碟 (MiB)"
 
+msgid "Disk image '%s' is missing."
+msgstr ""
+
+msgid "Disks"
+msgstr ""
+
 msgid "Download"
 msgstr "下載"
 
@@ -214,8 +245,11 @@ msgstr "編輯 VM"
 msgid "Edit VM."
 msgstr "編輯 VM。"
 
-msgid "Edit network."
+msgid "Edit disk."
 msgstr ""
+
+msgid "Edit network."
+msgstr "編輯網路。"
 
 msgid "Edit scheduled backup job."
 msgstr "編輯預定備份工作。"
@@ -235,6 +269,12 @@ msgstr "啟用自動啟動中 ..."
 msgid "Executing scheduled backup ..."
 msgstr "執行預定備份工作中 ..."
 
+msgid "Failed to create directory '%s'."
+msgstr ""
+
+msgid "Failed to create filesystem."
+msgstr ""
+
 msgid "Failed to force stop VM."
 msgstr "強制停止 VM 失敗。"
 
@@ -250,8 +290,22 @@ msgstr "啟動 VM 失敗。"
 msgid "Failed to stop VM."
 msgstr "停止 VM 失敗。"
 
+msgid "Filesystem"
+msgstr ""
+
 msgid "Firecracker"
 msgstr "Firecracker"
+
+msgid "Fixed once the disk is created."
+msgstr ""
+
+msgid ""
+"Fixed once the disk is created. A new disk is attached the next time the VM "
+"starts."
+msgstr ""
+
+msgid "Fixed once the network is created."
+msgstr ""
 
 msgid "Force stop"
 msgstr "強制停止"
@@ -263,13 +317,21 @@ msgid "Forcing stop ..."
 msgstr "強制停止中 ..."
 
 msgid "Host bridge"
-msgstr ""
+msgstr "主機橋接器"
 
 msgid ""
 "Host bridge attaches VMs on this network directly to an existing bridge "
 "device, giving them LAN visibility. Private NAT creates an isolated internal"
 " network with outbound internet access via NAT; VMs on it aren't directly "
 "reachable from the LAN."
+msgstr ""
+"主機橋接器將此網路上的 VM 直接連接到一個現有的橋接裝置，使它們能夠看見區域網路。私用 NAT 創建一個隔離的內部網絡，透過 NAT "
+"向外取用網際網路；該網路上的 VM 無法直接從區域網路存取。"
+
+msgid ""
+"How long Stop and Restart wait for the guest to shut down cleanly (sent "
+"Ctrl+Alt+Del) before stopping it hard. 0 always stops hard. x86_64 hosts "
+"only; on aarch64 Stop is always hard. Force stop never waits."
 msgstr ""
 
 msgid "Image"
@@ -286,6 +348,9 @@ msgstr "映像"
 msgid "Imported"
 msgstr "已匯入"
 
+msgid "Include in snapshots and backups"
+msgstr ""
+
 msgid "Install cterm"
 msgstr "安裝 cterm"
 
@@ -296,6 +361,9 @@ msgid ""
 "Installs the cterm plugin, which provides the web-based VM console/terminal "
 "link. Disable if you manage cterm yourself or don't want a console link."
 msgstr "安裝 cterm 插件，該插件提供基於 web 的 VM 控制台/終端機連結。如果您自行管理 cterm 或不需要控制台連結，可將它停用。"
+
+msgid "Jailer"
+msgstr ""
 
 msgid "Keep"
 msgstr "保留"
@@ -345,20 +413,26 @@ msgid ""
 "shrinks it. The VM must be stopped."
 msgstr "必須大於目前大小 － 這只會增加磁碟空間，從不會減少。VM 必須被停止。"
 
+msgid ""
+"Must be larger than the current size — this only grows the disk, it never "
+"shrinks it. The VM must be stopped. A disk without a filesystem only grows "
+"the image; extend the partition or filesystem from inside the guest."
+msgstr ""
+
 msgid "Name"
 msgstr "名稱"
 
 msgid "Network"
-msgstr ""
+msgstr "網路"
 
 msgid "Network '%s' does not exist."
-msgstr ""
+msgstr "網路 '%s' 不存在。"
 
 msgid "Network '%s' is still used by VM '%s'. Change that VM's network first."
-msgstr ""
+msgstr "網路 '%s' 仍被 VM '%s' 使用中。請先改變該 VM 的網路。"
 
 msgid "Networks"
-msgstr ""
+msgstr "網路"
 
 msgid ""
 "New size (%d MiB) must be larger than the current disk size (%d MiB). "
@@ -368,14 +442,23 @@ msgstr "新的大小 (%d MiB) 必須大於目前磁碟大小 (%d MiB)。不支�
 msgid "New size (MiB)"
 msgstr "新的大小 (MiB)"
 
+msgid "New size must be between 1 and 16777216 MiB."
+msgstr ""
+
 msgid "New size must be between 128 and 1048576 MiB."
 msgstr "新的大小必須在 128 與 1048576 MiB 之間。"
+
+msgid "None (raw, formatted by the guest)"
+msgstr ""
 
 msgid "Not installed"
 msgstr "未被安裝"
 
 msgid "Notes"
 msgstr "註釋"
+
+msgid "Only letters, digits and underscores are allowed."
+msgstr ""
 
 msgid "Open live console"
 msgstr "開啟即時控制台"
@@ -386,30 +469,42 @@ msgstr "此備份的選用性標記。"
 msgid ""
 "Optional. Lets this image coexist with other versions of the same "
 "name/architecture, e.g. when downloading a newer build later."
-msgstr ""
+msgstr "選擇性。允許此映像與其他同名/同架構的版本共存，例如：在稍後下載更新的建構版時。"
 
 msgid "Path"
 msgstr "路徑"
+
+msgid ""
+"Permanently deletes the disk's data. Leave unchecked to only detach it from "
+"the VM; creating a disk with the same VM, name and storage later reattaches "
+"the kept image."
+msgstr ""
 
 msgid "Please set a shared folder for VM/image storage on the Settings tab."
 msgstr "請在 設定 分頁中，設定 VM/映像 儲存用的一個共享資料夾。"
 
 msgid "Private NAT"
-msgstr ""
+msgstr "私用 NAT"
 
 msgid ""
 "Private subnet for this network, e.g. 172.30.0.0/24. Must not overlap "
 "another network or an existing host interface."
+msgstr "此網路的私用子網，例如 172.30.0.0/24。不得與其他網路或現有主機介面重疊。"
+
+msgid "Read-only"
 msgstr ""
 
 msgid "Resize"
 msgstr "調整大小"
 
-msgid "Resize disk"
-msgstr "調整磁碟大小"
-
 msgid "Resize disk ..."
 msgstr "調整磁碟大小 ..."
+
+msgid "Resize root disk"
+msgstr ""
+
+msgid "Resize root disk ..."
+msgstr ""
 
 msgid "Resizing disk ..."
 msgstr "調整磁碟大小中 ..."
@@ -417,8 +512,8 @@ msgstr "調整磁碟大小中 ..."
 msgid "Restart"
 msgstr "重新啟動"
 
-msgid "Restarted."
-msgstr "已重新啟動。"
+msgid "Restart requested. The guest is asked to shut down first."
+msgstr ""
 
 msgid "Restarting ..."
 msgstr "重新啟動中 ..."
@@ -441,6 +536,8 @@ msgid ""
 " memory state if it has one. Any changes made since the snapshot was taken "
 "will be lost. Continue?"
 msgstr ""
+"復原快照會停止 "
+"VM，將目前磁碟永久地以所選快照的儲存磁碟來覆蓋，若存在快照儲存的記憶體狀態，則將從該記憶體狀態啟動。自建立快照以後所做的任何更改都將丟失。是否繼續？"
 
 msgid "Restoring backup ..."
 msgstr "復原備份中 ..."
@@ -451,8 +548,8 @@ msgstr "復原快照中 ..."
 msgid ""
 "Restoring stops the target VM, permanently overwrites its current disk with "
 "this backup's saved disk, and boots from the backup's saved memory state if "
-"it has one. Any changes made since the backup was taken will be lost. "
-"Continue?"
+"it has one (only when restoring onto the VM the backup was taken from). Any "
+"changes made since the backup was taken will be lost. Continue?"
 msgstr ""
 
 msgid "Rootfs URL"
@@ -465,10 +562,32 @@ msgid "Run"
 msgstr "執行"
 
 msgid "Run DHCP for this network"
+msgstr "為此網路運行 DHCP"
+
+msgid "Run in jailer"
+msgstr ""
+
+msgid ""
+"Runs Firecracker through its jailer — chrooted, as its own unprivileged "
+"user, with only this VM's kernel, disks and network device inside. The VM's "
+"disk images are handed over to that user, so their owner changes to a "
+"numeric uid. Can only be changed while the VM is stopped. Warm snapshots and"
+" backups only restore with the setting they were taken with."
+msgstr ""
+
+msgid ""
+"Runs a DHCP and DNS server on the network's gateway address. Each VM keeps "
+"the fixed address it is always given via its kernel command line; this also "
+"hands that same address, and the gateway as DNS server, to guests that run a"
+" DHCP client. VMs without a MAC address set get a fixed one derived from "
+"their name. Applies to VMs as they start."
 msgstr ""
 
 msgid "Schedule"
 msgstr "預定"
+
+msgid "Security"
+msgstr ""
 
 msgid "Select a VM ..."
 msgstr "選擇一個 VM ..."
@@ -482,8 +601,26 @@ msgstr "設定"
 msgid "Shared folder"
 msgstr "共享檔案夾"
 
+msgid ""
+"Shared folder to store the disk image on. Leave empty to keep it with the VM"
+" on the VM storage shared folder. Fixed once the disk is created. If an "
+"image with this VM and disk name already exists there, it is reattached as-"
+"is."
+msgstr ""
+
+msgid ""
+"Shutdown requested. The VM stops once the guest has shut down, or after its "
+"shutdown timeout."
+msgstr ""
+
+msgid "Shutdown timeout (seconds)"
+msgstr ""
+
 msgid "Size"
 msgstr "大小"
+
+msgid "Size (MiB)"
+msgstr ""
 
 msgid "Snapshot"
 msgstr "快照"
@@ -509,9 +646,6 @@ msgstr "狀態"
 msgid "Stop"
 msgstr "停止"
 
-msgid "Stopped."
-msgstr "已被停止。"
-
 msgid "Stopping ..."
 msgstr "停止中 ..."
 
@@ -519,10 +653,10 @@ msgid "Storage"
 msgstr "儲存"
 
 msgid "Subnet (CIDR)"
-msgstr ""
+msgstr "子網 (CIDR)"
 
 msgid "Subnet must be in CIDR notation, e.g. 172.30.0.0/24."
-msgstr ""
+msgstr "子網必須採用 CIDR 表示法，例如 172.30.0.0/24。"
 
 msgid "Sync backup list"
 msgstr "同步備份列表"
@@ -530,14 +664,36 @@ msgstr "同步備份列表"
 msgid "Syncing backup list ..."
 msgstr "同步備份列表中 ..."
 
+msgid "Takes effect the next time the VM starts."
+msgstr ""
+
+msgid "The VM name and path must not contain line breaks."
+msgstr ""
+
+msgid ""
+"The VM, name, storage location and filesystem can only be set when a disk is"
+" created."
+msgstr ""
+
 msgid ""
 "The image can only be set when a VM is created. Delete and recreate the VM "
 "to use a different image."
+msgstr "映像只能在建立 VM 時設定。若要使用不同的映像，請刪除並重新建立 VM。"
+
+msgid ""
+"The name can only be set when a VM is created. Delete and recreate the VM to"
+" use a different name."
+msgstr ""
+
+msgid ""
+"The name can only be set when a network is created. Delete and recreate the "
+"network to use a different name."
 msgstr ""
 
 msgid ""
 "The target VM's current disk is overwritten with this backup's saved disk. "
-"Defaults to the VM the backup was taken from."
+"Onto a VM other than the one the backup was taken from, the saved memory "
+"state is not used and the VM cold boots."
 msgstr ""
 
 msgid ""
@@ -545,15 +701,32 @@ msgid ""
 "removing entries whose backup directory is gone. A copy of the list file is "
 "kept as omv-microvm-backup.list.bak. Continue?"
 msgstr ""
+"這將根據磁碟上的實際內容核對備份列表，並移除備份檔案目錄已不在的項目。會保留一份列表檔案的複本為 omv-microvm-"
+"backup.list.bak。是否繼續？"
+
+msgid ""
+"Turn off for large disks whose data is backed up some other way. An excluded"
+" disk is left as it is when a snapshot or backup is restored."
+msgstr ""
 
 msgid "Type"
-msgstr ""
+msgstr "型式"
 
 msgid "UUID"
 msgstr "UUID"
 
+msgid ""
+"Up to 16 letters, digits or underscores. Fixed once the disk is created. "
+"Disks are attached in name order after the root disk (/dev/vdb, /dev/vdc, "
+"...); an ext4 disk is also labelled with its name, so the guest can mount it"
+" by LABEL."
+msgstr ""
+
 msgid "VM"
 msgstr "VM"
+
+msgid "VM '%s' already has a disk named '%s'."
+msgstr ""
 
 msgid "VM '%s' has never been started; there is no disk to resize yet."
 msgstr "VM '%s' 從未被啟動過；還沒有磁碟可以調整大小。"
@@ -561,8 +734,18 @@ msgstr "VM '%s' 從未被啟動過；還沒有磁碟可以調整大小。"
 msgid "VM '%s' has never been started; there is nothing to snapshot yet."
 msgstr "VM '%s' 從未被啟動過；還沒有內容可以做快照。"
 
+msgid "VM '%s' is %s; it must be stopped before a disk can be removed."
+msgstr ""
+
 msgid "VM '%s' is %s; it must be stopped before its disk can be resized."
 msgstr "VM '%s' 是 %s；它必須先被停止，才能調整它的磁碟大小。"
+
+msgid "VM '%s' is %s; it must be stopped before its disks can be resized."
+msgstr ""
+
+msgid ""
+"VM '%s' is %s; it must be stopped before the jailer setting can be changed."
+msgstr ""
 
 msgid "VM '%s' is %s; must be running or stopped to take a snapshot."
 msgstr "VM '%s' 是 %s；必須在運行中或已停止，才能做快照。"
@@ -570,11 +753,19 @@ msgstr "VM '%s' 是 %s；必須在運行中或已停止，才能做快照。"
 msgid "VM '%s' not found."
 msgstr "找不到 VM '%s'。"
 
+msgid ""
+"VM '%s' on network '%s' is %s; stop it before changing the network's type or"
+" subnet."
+msgstr ""
+
 msgid "VM Name"
 msgstr "VM 名稱"
 
 msgid "VM name"
 msgstr "VM 名稱"
+
+msgid "VM state"
+msgstr ""
 
 msgid "VMs"
 msgstr "VMs"
@@ -582,7 +773,7 @@ msgstr "VMs"
 msgid ""
 "VMs on the same private NAT network can reach each other; VMs on a host "
 "bridge network are visible on the LAN."
-msgstr ""
+msgstr "同一私用 NAT 網路上的 VM 可以相互連接；主機橋接網路上的 VM 在區域網路中可見。"
 
 msgid "Version"
 msgstr "版本"
@@ -593,10 +784,13 @@ msgstr "暖備份"
 msgid ""
 "Where per-VM working directories (writable rootfs copies) and downloaded "
 "images are stored."
-msgstr ""
+msgstr "每個 VM 儲存其工作目錄 (可寫入根檔案系統複本) 和下載映像的位置。"
 
 msgid "aarch64"
 msgstr "aarch64"
+
+msgid "ext4"
+msgstr ""
 
 msgid "systemd unit status"
 msgstr "systemd 單元狀況"
